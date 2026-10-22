@@ -1,6 +1,8 @@
 [project]
 site_name = "Bale"
 site_description = "Bundle OCI images and artifacts for registry and offline transfer."
+repo_url = "https://github.com/strio-dev/bale"
+repo_name = "strio-dev/bale"
 nav = [
   { "Overview" = "index.md" },
   { "Getting started" = "getting-started.md" },

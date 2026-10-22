@@ -51,6 +51,9 @@ check:
 build:
     nix build path:.#bale --out-link result-bale
 
+container-build:
+    nix build --no-update-lock-file path:.#container --out-link result-container
+
 release-check:
     nix flake check . --no-update-lock-file
 

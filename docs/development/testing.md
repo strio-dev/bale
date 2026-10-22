@@ -2,6 +2,10 @@
 
 Run focused checks for the code you change, then `just check`. The root library, Helm discovery producer (`plugins/helm`) and native consumers (`plugins/helm-relocate`) are separate Go modules. `just test`, `just vet` and `just lint` cover all three.
 
+## Container image
+
+`just container-build` produces `result-container/`, an OCI image layout. Native checks validate its digests, architecture, static executable, CA bundle, license files and non-root filesystem permissions. See [local container builds](../guides/container.md#build-locally) to run it with Podman.
+
 ## Plugin and consumer builds
 
 | Command | Checks or output |

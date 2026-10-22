@@ -19,6 +19,7 @@ let
       lib.getAttrs (
         [
           "build"
+          "container"
           "release-binary"
           "helm-consumer"
           "flux-service"

@@ -10,7 +10,7 @@ Install a Linux AMD64 or ARM64 release:
 curl -fsSL https://bale.strio.dev/install.sh | sh
 ```
 
-See [getting started](https://bale.strio.dev/getting-started/) for requirements, exact versions and alternative installs.
+See [getting started](https://bale.strio.dev/getting-started/) for requirements, exact versions, the container image and Nix.
 
 ## Quick start
 

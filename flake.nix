@@ -36,6 +36,7 @@
             inherit version;
             go_1_27 = go;
           };
+          container = pkgs.callPackage ./nix/container.nix { inherit bale; };
           helm-plugin = pkgs.callPackage ./nix/helm-plugin.nix {
             inherit version;
             go_1_27 = go;
@@ -86,6 +87,7 @@
             default = bale;
             inherit
               bale
+              container
               docs
               release-binary
               helm-plugin
@@ -132,11 +134,18 @@
             CGO_ENABLED = "0";
           };
           devShells.security = pkgs.callPackage ./nix/security.nix { };
+          devShells.release = pkgs.mkShell {
+            packages = [
+              pkgs.skopeo
+              pkgs.regctl
+            ];
+          };
           checks = import ./nix/checks.nix {
             inherit
               pkgs
               go
               bale
+              container
               docs
               helm-plugin
               helm-consumer

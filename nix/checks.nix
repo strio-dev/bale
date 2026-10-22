@@ -2,6 +2,7 @@
   pkgs,
   go,
   bale,
+  container,
   docs,
   helm-plugin,
   helm-consumer,
@@ -24,6 +25,7 @@ let
 in
 {
   build = bale;
+  inherit container;
   release-binary = release.check;
   installer = pkgs.callPackage ./installer-check.nix { };
   go-check = quality;

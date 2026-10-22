@@ -66,7 +66,12 @@ in
     vet = command "vet" [ ] (eachModule ''go vet ./... "$@"'');
     lint = command "lint" [ golangci-lint ] (eachModule ''golangci-lint run "$@"'');
     vuln = command "vuln" [ govulncheck ] (eachModule ''govulncheck "$@" ./...'');
-    codeql-build = command "codeql-build" [ ] (eachModule ''go build ./... "$@"'');
+    codeql-build = command "codeql-build" [ ] ''
+      # Preserve CodeQL's tracing wrapper before Nix changes PATH.
+      go_binary="''${1:-go}"
+      if (( $# )); then shift; fi
+      ${eachModule ''"$go_binary" build ./... "$@"''}
+    '';
     fmt = command "fmt" [ findutils nixfmt just ] ''
       set -- -w "$@"
       nixfmt_args=()

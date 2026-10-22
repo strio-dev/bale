@@ -47,8 +47,12 @@ in
       export SEMGREP_RULES=.cache/semgrep-rules
       export SEMGREP_SEND_METRICS=off
       export SEMGREP_ENABLE_VERSION_CHECK=0
+      error_mode=--error
+      case "''${1:-}" in
+        --error|--no-error) error_mode="$1"; shift ;;
+      esac
       status=0
-      semgrep scan --error --strict --jobs 2 \
+      semgrep scan "$error_mode" --strict --jobs 2 \
         --exclude 'charts/bale-flux/templates/**' \
         --sarif-output .cache/semgrep.raw.sarif \
         "$@" . nix/tests/installer.py tests/packaging/container_image.py tests/packaging/flux_image.py || status=$?

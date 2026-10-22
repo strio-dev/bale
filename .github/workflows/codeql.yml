@@ -60,7 +60,7 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
       - name: Build Go in the Nix environment
         if: matrix.language == 'go'
-        run: nix run --no-update-lock-file path:.#dev-codeql-build
+        run: nix run --no-update-lock-file path:.#dev-codeql-build -- "$(command -v go)"
       - name: Analyze
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:

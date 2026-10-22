@@ -1,58 +1,74 @@
 # Go SDK
 
-Go applications import `github.com/strio-dev/bale`. The SDK transfers OCI graphs from registries or caller-owned ORAS stores, captures bundles, and inspects verified bundle metadata. See [getting started](getting-started.md) for the bundle workflow.
+Import `github.com/strio-dev/bale` to capture bundles, transfer OCI graphs and inspect delivery metadata. Application integrations supply discovery and reference rewriting; Bale preserves artifact bytes. See [bundle lifecycle](concepts/bundles.md) for the underlying model.
 
 ## Configure a client
-
-`bale.NewClient(bale.ClientOptions{})` uses anonymous authentication. Supply `ClientOptions.Credentials` for authenticated requests; the SDK does not read Docker credential files. The CLI explicitly loads them.
-
-Callers can inject an `HTTPClient` for TLS and transport policy, allow exact HTTP registry hosts through `PlainHTTPRegistries`, and receive synchronous `OnProgress` callbacks.
-
-Capture progress includes `resolving`, `resolving-plugin`, `fetching-plugin`, `running-plugin`, `capturing` and `captured` operations. Recipe events carry an optional zero-based `Input`, the selected artifact `Reference` and configured `Plugin`; `Descriptor` identifies the pinned subject when available. Fetch and run events precede those operations, and `running-plugin` covers both compilation and execution through the caller's runner. `captured` means the snapshot was built; publication remains reported separately through `copied` and `tagged`. Dry runs report capture progress without publication events.
-
-Callbacks remain serialized and synchronous. Capture notifications are advisory and may be skipped when another operation's callback is active, so a blocked observer cannot stall unrelated capture or cancellation while waiting to publish. Return promptly from callbacks and use the operation result to determine completion.
-
-`ParseRecipe` parses strict YAML and resolves authoring defaults. `NormalizeRecipe` applies the same defaults to a deep copy of a Go recipe. Bundle operations are available through `Create`, `Pull`, `PlanPush`, and `Push`.
-
-## Capture and archive locally
-
-```go
-captured, err := client.CreateLayout(ctx, recipe, "./release", bale.CreateOptions{
-    ExportDelivery: true,
-})
-if err != nil {
-    return err
-}
-saved, err := client.Save(ctx, "./release", "./release.tar")
-if err != nil {
-    return err
-}
-restored, err := client.Load(ctx, "./release.tar", "./restored")
-if err != nil {
-    return err
-}
-// captured.Descriptor, saved.Descriptor and restored.Descriptor are identical.
-```
-
-`CreateLayout` captures the same recipe, dependencies and configured plugins as `Create`, using read access to source registries. It installs a new complete OCI layout without registry publication. `CreateOptions.DryRun` captures and validates without installing it; `ExportDelivery` returns paths from that exact capture. `CreateResult.LayoutPath` is set only after successful local installation, while `Published` reports registry publication only.
-
-`Save` and `Load` return `ArchiveResult` with `Descriptor`, `LayoutPath` and `ArchivePath`. They validate the complete captured graph, retain original digests and store shared blobs once in an uncompressed OCI-layout tar archive. Both are offline: no credentials, plugin execution or registry access. Destinations must be new paths. A restored layout works with `InspectLayout`, `DiffLayouts`, `UpdateDeliveryLayouts`, `PlanPush` and `Push`; those methods take a layout directory rather than an archive filename. See [offline packaging](offline.md) for the CLI workflow.
-
-## Transfer an artifact graph
-
-Direct graph transfers do not require a bundle. This snippet assumes an existing `context.Context` named `ctx` in a function returning an error, and imports Bale as `bale`:
 
 ```go
 client, err := bale.NewClient(bale.ClientOptions{})
 if err != nil {
     return err
 }
+```
+
+The examples below are function-body excerpts using this client and an existing `context.Context` named `ctx`, in a function returning `error`. Transfer and attachment examples also import `fmt`. Registry names are placeholders.
+
+| `ClientOptions` field | Purpose |
+| --- | --- |
+| `Credentials` | Caller-supplied ORAS credential callback. The default is anonymous; the SDK does not read Docker credential files. |
+| `HTTPClient` | Caller-owned TLS and transport policy. |
+| `PlainHTTPRegistries` | Exact registry hosts allowed to use HTTP. |
+| `OnProgress` | Synchronous, serialized progress callbacks. Return promptly. |
+| `PluginRunner` | Explicit support for running configured discovery plugins. |
+
+Capture progress reports resolution, plugin fetch/run and capture phases; `captured` precedes publication. Recipe events identify the zero-based `Input`, `Reference` and `Plugin`, with a pinned `Descriptor` when available. Capture notifications are advisory and can be skipped while another callback is active. Determine completion from results, not event counts.
+
+## Capture and archive locally
+
+```go
+recipe, err := bale.ParseRecipe([]byte(`include:
+  - registry.example.com/apps/web:stable
+`))
+if err != nil {
+    return err
+}
+captured, err := client.CreateLayout(ctx, recipe, "./release", bale.CreateOptions{
+    ExportDelivery: true,
+})
+if err != nil {
+    return err
+}
+_, err = client.Save(ctx, captured.LayoutPath, "./release.tar")
+if err != nil {
+    return err
+}
+_, err = client.Load(ctx, "./release.tar", "./restored")
+return err
+```
+
+`ParseRecipe` reads strict authoring YAML; `NormalizeRecipe` validates and applies defaults to a deep copy of a Go recipe. `CreateLayout` needs only source read access. `CreateOptions.DryRun` captures without installing a layout; `ExportDelivery` returns paths from that exact capture. `LayoutPath` confirms completed local output; `Published` is reserved for registry publication.
+
+`Save` and `Load` verify the captured graph and preserve digests in an uncompressed, deduplicated OCI-layout tar archive. They are offline and require new destination paths. `ArchiveResult` reports `Descriptor`, `LayoutPath` and `ArchivePath`. Other local APIs take the layout directory, not the tar filename.
+
+| Operation | API |
+| --- | --- |
+| Capture to a registry | `Create(ctx, recipe, reference, options)` |
+| Capture to a local layout | `CreateLayout(ctx, recipe, path, options)` |
+| Retrieve a bundle | `Pull(ctx, reference, path, PullLocked)` or `PullLatest` |
+| Archive / restore | `Save(ctx, layout, archive)` / `Load(ctx, archive, layout)` |
+| Plan / publish a layout | `PlanPush(ctx, layout, destination, options)` / `Push(ctx, plan)` |
+
+## Transfer an artifact graph
+
+Direct transfers do not require a bundle:
+
+```go
 root, err := client.Resolve(ctx, "registry.example.com/components/tool:v1")
 if err != nil {
     return err
 }
 plan, err := client.Plan(ctx, bale.TransferRequest{
-    Roots: []bale.Root{root},
+    Roots:       []bale.Root{root},
     Destination: "mirror.example.com/release",
     RepositoryMap: map[string]string{
         root.Repository: "components/tool",
@@ -62,54 +78,44 @@ if err != nil {
     return err
 }
 result, err := client.Execute(ctx, plan)
-// Inspect result even when err is non-nil: it retains confirmed publications.
+fmt.Printf("Confirmed relocations: %d\n", len(result.Relocations))
+return err
 ```
 
-`Plan` reads and validates the graph without publishing. `plan.View()` returns a defensive inspection copy. Execution uses pinned descriptors. Plans are in-memory objects; their JSON inspection view is not an executable serialized plan.
-
-`result.Relocations.Lookup(bale.ArtifactID{Repository: root.Repository, Digest: root.Descriptor.Digest})` returns the confirmed destination coordinate. Tags are reported separately, and publication across tags is not atomic. Inspect results on failure to distinguish confirmed publications from planned work.
+`Plan` validates the graph without publishing; execution uses pinned descriptors. `plan.View()` is a defensive inspection copy, not a serializable executable plan. `result.Relocations.Lookup(bale.ArtifactID{Repository: root.Repository, Digest: root.Descriptor.Digest})` returns a confirmed destination coordinate. Tags are reported separately; publication across tags and repositories is not atomic.
 
 ### Caller-owned content and discovery
 
-For local content, construct a `bale.Root` with its repository provenance, descriptor, caller-owned `content.ReadOnlyStorage`, and optional aliases. Keep the store available through execution.
+Construct `Root` with `Repository` provenance, `Descriptor`, caller-owned `content.ReadOnlyStorage`, and optional `Aliases`. Keep stores available through execution. Bale neither closes them nor takes ownership; callers coordinate shared-store access and preserve digest-addressed content integrity.
 
-Set `Referrers: bale.ReferrerPolicy{Include: "none"}` when no discovery provider is available. The default policy selects all and needs a `ReferrerSource`; `Resolve` supplies its registry provider. Required referrers remain additive and are validated against their subjects.
+The default referrer policy is `all` and requires `ReferrerSource`; `Resolve` supplies a registry provider. For a store without discovery, set `Referrers: bale.ReferrerPolicy{Include: "none"}`. Required referrers remain additive. Caller-owned providers choose their listing strategy; Bale verifies selected attachment bytes and subjects.
 
-Caller-supplied discovery providers control their own listing strategy, including ORAS native/fallback choices. Bale verifies each selected attachment's bytes and subject. Bale-created registry providers and destination confirmation share strict inventory and referrer validation.
-
-Application integrations own application-specific dependency discovery and reference rewriting. They can declare dependencies hidden in application payloads and consume the resulting relocation map.
-
-Bundle push also publishes [destination records](destinations.md) for later consumers that do not retain the operation result.
+Direct `Plan`/`Execute` follows the immutable OCI graph and selected referrers, without resolving references inside dependency declarations. Use bundle creation to capture those dependencies. Bundle push also generates [destination records](destinations.md).
 
 ## Author dependency declarations
-
-Prepare a declaration and publish it using the attachment operation. This snippet continues with the client and context above:
 
 ```go
 subject, err := client.Resolve(ctx, "registry.example.com/charts/web:1.4")
 if err != nil {
     return err
 }
-attachment, err := bale.PrepareDependencyDeclaration(ctx, subject,
-    bale.DependencyDeclaration{
-        Dependencies: []bale.DependencyReference{
-            {Ref: "registry.example.com/images/web:stable"},
-        },
-    })
+request, err := bale.PrepareDependencyDeclaration(ctx, subject,
+    bale.DependencyDeclaration{Dependencies: []bale.DependencyReference{
+        {Ref: "registry.example.com/images/web:stable"},
+    }})
 if err != nil {
     return err
 }
-attached, err := client.Attach(ctx, attachment)
-// Inspect attached.Published and attached.Discoverable even on error.
+attached, err := client.Attach(ctx, request)
+fmt.Printf("Published: %t, discoverable: %t\n", attached.Published, attached.Discoverable)
+return err
 ```
 
-`PrepareDependencyDeclaration` builds a deterministic local metadata store without reading the subject's source store or resolving dependency targets. `ParseDependencyDeclaration` parses strict authoring YAML with an implicit schema version, rejects an explicit `schemaVersion` field, requires a `dependencies` array, and validates references and policies without registry access. `EncodeDependencyDeclaration` and `DecodeDependencyDeclaration` provide strict JSON authoring and validation; registry JSON carries `schemaVersion: 1`. The CLI exposes this workflow through [`bale dependencies attach`, `list`, and `inspect`](dependencies.md#author-and-attach-a-declaration).
-
-`Create` and latest `Pull` interpret these declarations. Direct `Plan`/`Execute` transfers only the supplied immutable OCI graph and selected referrers, without resolving declaration references. Use a bundle to capture an offline dependency set. See [dependency declarations](dependencies.md) for the schema and inclusion rules.
+Preparation builds deterministic local metadata without reading the subject store or resolving dependency targets. `ParseDependencyDeclaration` accepts strict authoring YAML with an implicit version; `EncodeDependencyDeclaration` and `DecodeDependencyDeclaration` validate registry JSON with `schemaVersion: 1`. See [dependency declarations](dependencies.md) for fields and following rules.
 
 ### Run a dependency plugin
 
-Import `github.com/strio-dev/bale/plugin` as `plugin`. Opt into executing configured recipe plugins by injecting a runner when constructing the client:
+Import `github.com/strio-dev/bale/plugin` as `plugin` and opt into recipe execution:
 
 ```go
 client, err := bale.NewClient(bale.ClientOptions{
@@ -120,149 +126,67 @@ if err != nil {
 }
 ```
 
-`Create` runs the plugins selected in the recipe. The client resolves their OCI graphs, verifies module bytes, assembles literal input and blob bindings, and invokes the supplied runner. The resulting bundle retains plugin provenance and generated declarations without publishing source attachments. A client without a runner rejects recipes that require execution.
+Creation resolves OCI plugins, verifies modules, binds inputs and retains provenance plus generated declarations. Without a runner, a recipe requiring execution fails. Locked pull and push never run plugins. Latest refresh additionally requires `PullWithOptions(ctx, ref, path, bale.PullLatest, bale.PullOptions{AllowPlugins: true})`.
 
-Locked pull and push do not execute plugins. For latest pull of a plugin recipe, additionally authorize execution through `client.PullWithOptions(ctx, reference, layout, bale.PullLatest, bale.PullOptions{AllowPlugins: true})`.
+| Plugin API | Use |
+| --- | --- |
+| `plugin.RunOCI(ctx, client, request, options)` | Run an OCI plugin using the client's credentials and transport. |
+| `plugin.Run(ctx, request, options)` | Run an explicit local module. |
+| `plugin.Pack(ctx, store, modulePath)` | Write a portable Wasm OCI graph into caller-owned storage for transfer. |
 
-For a manual registry run, supply a plugin-defined JSON request (`encoding/json` is imported as `json`):
-
-```go
-result, err := plugin.RunOCI(ctx, client, plugin.OCIRequest{
-    Ref: "registry.example.com/plugins/references:1",
-    Input: json.RawMessage(`{"refs":["registry.example.com/images/web:stable"]}`),
-}, plugin.Options{})
-if err != nil {
-    return err
-}
-// result.Descriptor pins the plugin's resolved OCI root.
-attachment, err := bale.PrepareDependencyDeclaration(ctx, subject, result.Declaration)
-if err != nil {
-    return err
-}
-attached, err := client.Attach(ctx, attachment)
-// Inspect attached.Published and attached.Discoverable even on error.
-```
-
-Registry credentials and transport policy come from the supplied client. Manual input must contain any archive bytes the plugin needs; recipe blob bindings apply during capture. `plugin.Run(ctx, plugin.Request{ModulePath: "references.wasm", Input: input}, options)` remains available for explicit local development.
-
-`plugin.Pack(ctx, store, modulePath)` writes a portable Wasm OCI image to caller-owned `content.Storage` and returns its manifest descriptor. Publish that graph using the existing transfer API; the CLI exposes packaging and publication through `bale plugins push`.
-
-`Options` exposes `ExecutionTimeout`, `MemoryLimitBytes`, and `CacheDirectory`. Zero timeout and memory values use 30 seconds and 256 MiB; an empty cache directory disables persistent caching. The SDK does not choose a user cache directory. Cached native code is private to the runtime and must remain local and trusted.
-
-The package exposes no Wago types. Plugins use the portable WASI Preview 1 command contract and strict declaration JSON, so an engine replacement can preserve caller and guest interfaces. Runs serialize within the process; waiting is cancellable, but synchronous compilation can delay cancellation. Execution time and linear-memory limits do not cap compilation time or total process memory. See [dependency plugins](plugins.md) for the input/output contract, fixed size limits, and a complete Go guest example.
+Manual requests supply plugin-defined JSON, including any required archive bytes. Recipe blob bindings apply during capture. Defaults are 30 seconds and 256 MiB of linear memory; an empty `CacheDirectory` disables persistent caching. Keep cached native code local and trusted. Runs serialize within the process and waits are cancellable; synchronous compilation can delay cancellation. These settings do not cap compilation time or total process memory. See [dependency plugins](plugins.md) for the portable contract and limits.
 
 ## Publish and discover attachments
 
-Publish a prepared OCI attachment with `client.Attach(ctx, bale.AttachRequest{Subject: subjectReference, Descriptor: attachmentDescriptor, Store: store})`. The subject must already exist in its registry. The caller prepares an OCI manifest or index whose `subject` matches that object and supplies its complete strong dependency closure in a caller-owned store.
+`Attach(ctx, AttachRequest{Subject: reference, Descriptor: descriptor, Store: store})` publishes an OCI manifest or index into its existing subject's repository. Supply matching `subject` metadata and the complete strong dependency closure. Bale preserves bytes, verifies uploaded content and confirms discoverability. Retrying repairs missing inventory entries even when the manifest already exists.
 
-Bale preserves the attachment bytes, publishes into the subject's repository, verifies the uploaded closure, and confirms referrer discovery. It repairs a missing referrer inventory entry on retry, including when the attachment manifest already exists.
+| API | Result |
+| --- | --- |
+| `ListReferrers(ctx, ref, options)` | Sorted, verified descriptors; optional `ArtifactType` filter. An error may retain already validated entries. |
+| `InspectDependencies(ctx, ref)` | Parsed declarations sorted by digest, without selecting or resolving their dependencies. Errors return no declarations. |
+| `Attach(ctx, request)` | Separate confirmed `Published` and `Discoverable` states, including on failure. |
 
-Inspect `AttachResult.Published` and `Discoverable` separately on errors; they report confirmed work. Upload statistics count successful SDK graph operations. They can undercount bytes when a manifest upload succeeds but its inventory update fails. `Published` uses independent verification of remote content.
-
-`client.ListReferrers(ctx, subjectReference, bale.ListReferrersOptions{ArtifactType: "application/vnd.example.dependencies.v1"})` returns sorted, verified OCI referrer descriptors. Omit `ArtifactType` to list all. It verifies actual envelope bytes and subjects before applying the effective artifact type filter; an OCI manifest without an explicit artifact type uses its config media type. A failure can return already validated entries alongside the error.
-
-`client.InspectDependencies(ctx, subjectReference)` returns all verified attached Bale dependency declarations as `[]bale.InspectedDeclaration`, sorted by declaration digest. Each record includes `Repository`, the pinned `Subject`, the declaration `Descriptor`, and the parsed `Declaration`, including its context and dependency entries. The method reads declaration metadata without resolving dependency references or applying a selection. Empty results are a non-nil slice; failure returns no data. The CLI exposes this through `bale dependencies inspect SUBJECT`, with JSON output by default and per-record Go templates via `-f`/`--format`.
+Referrer filters apply after validating envelopes and subjects. Without an explicit artifact type, an OCI manifest uses its config media type. Graph upload statistics can undercount bytes when content upload succeeds but inventory publication fails; `Published` relies on independent verification.
 
 ### Inspect delivered destinations
 
-`client.InspectDestinations(ctx, subjectReference)` returns `[]bale.InspectedDestination`, sorted by attachment digest. Each entry includes `Repository`, pinned `Subject`, attachment `Descriptor`, parsed `Record` and `Local`. It validates bounded registry metadata without reading application payloads or resolving recorded locations. Empty results are a non-nil slice; errors return no records.
+`InspectDestinations(ctx, ref)` returns sorted `InspectedDestination` records with `Repository`, pinned `Subject`, attachment `Descriptor`, parsed `Record` and `Local`. It reads metadata without contacting recorded locations. Empty results are nonnil slices; errors return no records.
 
-Use `client.InspectDestinationsWithOptions(ctx, reference, bale.DestinationInspectionOptions{MaxMetadataBytes: 4 << 20, MaxReferrers: 256})` to bound aggregate inventory and attachment reads before fetching more content. The byte budget includes validation rereads; the referrer limit counts advertised entries. Zero limits preserve the original inspection behavior. Errors return no partial records. These limits do not cap process memory.
+`InspectDestinationsWithOptions` accepts `DestinationInspectionOptions.MaxMetadataBytes` and `MaxReferrers` to bound aggregate metadata reads and advertised inventory entries. The byte budget includes validation rereads; zero preserves default behavior. These limits do not cap process memory.
 
-`Local` identifies a record whose destination matches the queried repository and digest. Callers select the intended source, bundle, capture and declaration explicitly, rejecting ambiguity; local does not imply newest, completed or currently available. Historical records can coexist with local ones.
-
-`PlanPush` exposes sealed `DeliveryPlan.Destinations` as `[]DestinationAttachment`. `PushResult.Destinations` reports each attempted attachment through `AttachResult`, including `Published` and `Discoverable` even on error. Canonical artifact `Relocations` remain separate from generated metadata. `EncodeDestinationRecord` and `DecodeDestinationRecord` validate the strict JSON representation without registry access; `DestinationArtifactType`, `DestinationVersion` and `DestinationMaxBytes` describe the wire contract. See [destination records](destinations.md) for fields and publication limits.
+`Local` matches the queried repository and digest. Select the intended source, bundle, capture and declaration explicitly and reject ambiguity; local does not establish recency or completion. `DeliveryPlan.Destinations` contains planned attachments; `PushResult.Destinations` reports their publication and discovery separately. `EncodeDestinationRecord` and `DecodeDestinationRecord` validate the JSON wire format. See [destination records](destinations.md).
 
 ### Publication coordination
 
-Registry publication through `Attach`, `Create`, `Execute`, and `Push` serializes per client and allows cancellation while waiting. Read-only registry operations and dry runs do not acquire this permit.
-
-Coordinate overlapping publication by other clients or processes in the calling application. Fallback inventory updates do not provide distributed atomicity. See [registry behavior and retention](registry.md) for publication and garbage-collection constraints.
+`Attach`, `Create`, `Execute` and `Push` serialize registry publication per client, with cancellable waits. Reads and dry runs do not acquire that permit. Applications coordinate overlapping writers using other clients or processes; fallback inventories offer no distributed atomicity. `Stats` counts graph work rather than total HTTP traffic: downloads exclude verification/latest rereads, uploads include generated JSON, and API overhead is excluded. See [registry behavior](registry.md).
 
 ## Inspect a bundle
 
-Read a verified bundle without creating a layout or planning a delivery. This snippet uses the same client and context:
+| Operation | Registry | Local layout | Caller-owned root |
+| --- | --- | --- | --- |
+| Inspect | `Inspect` | `InspectLayout` | `InspectRoot` |
+| Compare | `Diff` | `DiffLayouts` | `DiffRoots` |
+| Export delivery paths | `ExportDelivery` | `ExportDeliveryLayout` | `ExportDeliveryRoot` |
+| Carry edited paths forward | `UpdateDelivery` | `UpdateDeliveryLayouts` | `UpdateDeliveryRoots` |
 
-```go
-inspection, err := client.Inspect(ctx, "registry.example.com/bundles/release:v1")
-if err != nil {
-    return err
-}
-// inspection.Metadata contains the captured recipe, roots, origins,
-// referrer associations, dependency resolutions and plugin provenance.
-// inspection.Declarations contains the selected declaration JSON and subjects.
-```
+Registry variants pin each reference once; identical operands share a read in comparison and updates. Layout variants are offline. Root variants use pinned descriptors without closing or modifying caller-owned stores.
 
-The SDK offers three entry points:
-
-| Method | Source |
-| --- | --- |
-| `Inspect(ctx, reference)` | A registry bundle reference, resolved once. |
-| `InspectLayout(ctx, path)` | A completed local OCI bundle layout, without network access or writes. |
-| `InspectRoot(ctx, root)` | A pinned bundle descriptor in a caller-owned read-only store. |
-
-Each returns `InspectResult` with `Descriptor`, `Metadata`, and `Declarations`. `Metadata.Dependencies` records original selectors and resolved digests. `Metadata.Plugins` records each configured input, subject, original plugin reference, pinned plugin root and generated declaration descriptor. `Declarations` pairs selected declaration JSON with its subject and source repository.
-
-All three APIs verify the complete captured graph and nested native bundle metadata before returning a report. Registry inspection reads and hashes captured payloads, so large bundles can take time. Inspection does not refresh source selectors or discover additional referrers.
-
-Reports describe the inspected bundle. Nested bundles retain their own inventories; pass a nested bundle's pinned descriptor and the same store to `InspectRoot` to inspect it separately. `InspectRoot` does not close the caller's store or change its ownership.
-
-Failure returns an empty report and a typed error. Content integrity validation does not verify publisher signatures. See [inspection](inspection.md) for CLI output and templates.
-
+Inspection returns `Descriptor`, `Metadata` and selected `Declarations` after verifying the complete captured graph, including nested bundle metadata. It can hash substantial remote payloads. Metadata retains recipes, roots, origins, referrers, dependency resolutions and plugin provenance. Inspect a nested bundle separately with its descriptor and the same store. Failure returns an empty report and typed error; integrity verification does not verify publisher signatures.
 
 ## Compare bundles
 
-```go
-changes, err := client.DiffLayouts(ctx, "./locked", "./refreshed")
-if err != nil {
-    return err
-}
-// changes.Changed compares bundle digests; RecipeChanged compares recipes.
-// Artifacts reports added/removed source repository + digest identities.
-// Resolutions compares descriptor sets for original input, dependency and plugin refs.
-// Declarations compares dependency policy, outcome, selected declaration and context.
-```
+`DiffResult` contains pinned `Before`/`After`, `Changed`, `RecipeChanged`, and sorted, nonnil `Artifacts`, `Resolutions` and `Declarations`. Artifact identity includes source repository and digest. Repeated selectors are compared as sets; recipe comparison preserves input order and JSON values while ignoring object key order and whitespace.
 
-`Diff(ctx, beforeRef, afterRef)` resolves each registry operand once; identical reference strings share one pinned inspection. `DiffLayouts(ctx, beforePath, afterPath)` reads two single-root OCI layouts without network access, credentials or writes. `DiffRoots(ctx, beforeRoot, afterRoot)` uses caller-owned read-only stores and does not close or modify them.
-
-All return `DiffResult` with pinned `Before` and `After` descriptors, `Changed`, `RecipeChanged`, and sorted, nonnil `Artifacts`, `Resolutions` and `Declarations` slices. Comparison groups repeated selectors and profiles into sets instead of matching by input index. Artifact identity includes source repository; descriptor annotations and platform hints do not create artifact replacements. Recipe comparison ignores JSON object key order and whitespace while preserving input ordering, large integers and explicit null values.
-
-These APIs validate OCI envelopes, interpreted Bale metadata and selected declaration JSON, including nested bundle metadata. They do not refresh sources, discover referrers, execute plugins, publish content, or read or check the existence of opaque application configs and payloads. Comparison does not prove opaque content availability or integrity. `Inspect`, pull and transfer planning retain complete graph validation.
-
-Detailed observation changes cover each root bundle's metadata. Compare nested bundles separately through their pinned references or `DiffRoots`; their captured artifact membership is still included in the outer inventory. Failure returns an empty result with the underlying typed error and operand context. Cancellation remains detectable with `errors.Is`.
-
-See [snapshot comparison](inspection.md#compare-snapshots) for CLI output, formatting and exit codes.
+Diff validates envelopes and interpreted metadata, including nested metadata, without reading opaque application payloads. It does not prove their availability or integrity. Detailed observations cover the root bundle; compare nested observations separately. Failure returns an empty result with operand context; cancellation remains detectable with `errors.Is`. See [snapshot comparison](inspection.md#compare-snapshots).
 
 ## Export and apply delivery paths
 
-`client.ExportDelivery(ctx, reference)` resolves a registry bundle once and returns a `DeliveryFile`. It reads and hashes supported OCI manifests and indexes plus interpreted Bale metadata and declaration JSON, validating captured source coordinates, inventory membership, subjects, dependencies and nested native metadata. It does not resolve original sources, discover referrers, or download or check the existence of opaque application configs and payload layers. Remote export does not prove payload availability or integrity; `Inspect`, `Pull`, `PlanPush` and `Push` retain full graph validation.
+Export returns a `DeliveryFile` bound to the bundle digest. Its `Artifacts` contain source `Ref` and relative destination `Path`, flattening nested inventories. `EncodeDeliveryFile` and `DecodeDeliveryFile` handle strict YAML. Registry export validates captured manifests and metadata without checking opaque payloads; layout and root export verify the complete captured graph.
 
-`ExportDeliveryLayout(ctx, path)` reads a completed local layout without network access or changes to the layout. `ExportDeliveryRoot(ctx, root)` uses a pinned descriptor in a caller-owned store. Both verify the complete captured graph. All three export methods flatten nested native inventories into default delivery paths.
-
-`DeliveryFile.Bundle` binds the file to the root digest. Each `DeliveryArtifact` contains a digest-pinned source `Ref` and a relative destination `Path`. `EncodeDeliveryFile` and `DecodeDeliveryFile` encode and strictly validate its YAML representation. Export produces default paths; retain user edits separately.
-
-Set `CreateOptions.ExportDelivery: true` to receive `CreateResult.Delivery` from that exact capture, including during a dry run. To deliver an edited file, decode it and pass its address as `PushOptions.Delivery` to `PlanPush`. Artifact paths override `RepositoryMap`; omitted artifacts use defaults and remain included. Planning checks the bundle digest and captured identities before publication. Required graph and referrer copies remain colocated even when the primary publication path differs. See [transfers](transfers.md#export-delivery-paths) for the YAML and CLI workflow.
-
-`PlanPush` verifies the complete local graph and builds a sealed in-memory `DeliveryPlan` without network access or writes. `Relocations` reports canonical source-to-destination placements; `Repositories` contains copy roots with their OCI graphs, `Tags` contains restored aliases, and `Destinations` contains generated attachments. `Destination` is the separate bundle completion reference. JSON inspection of a plan is a report and cannot be loaded as an executable plan. Destination availability, credentials and existing remote tags are checked when `Push` executes. The CLI exposes local planning through [`bale push --dry-run`](transfers.md#push-to-a-destination).
+Pass an edited file as `PushOptions.Delivery` to `PlanPush`. Paths override `RepositoryMap`; omitted rows retain defaults and remain included. Planning verifies the entire local graph, digest binding, captured identities and destination layout without network access or writes. Its sealed, in-memory `DeliveryPlan` reports planned `Relocations`, `Repositories`, `Tags` and `Destinations`; `Destination` is the bundle completion reference. JSON output cannot be reloaded as an executable plan. Remote availability, credentials and existing tags are checked during `Push`. Its result retains confirmed `Relocations` and `Tags` on failure; `Repositories`, `RepositoryMap` and `Referrers` describe planned work. See [delivery paths](transfers.md#export-delivery-paths).
 
 ## Update delivery paths
 
-```go
-updated, err := client.UpdateDeliveryLayouts(ctx, "./locked", "./refreshed", oldFile)
-if errors.Is(err, bale.ErrConflict) {
-    // updated.Conflicts explains ambiguous assignments; Delivery is nil.
-    return err
-}
-if err != nil {
-    return err
-}
-data, err := bale.EncodeDeliveryFile(*updated.Delivery)
-```
+Update methods return a candidate file; they do not write it. `DeliveryUpdateResult` contains `Before`, `After`, `Delivery`, sorted `Changes` and `Conflicts`. Preserve authored paths for exact identities or unambiguous one-to-one selector changes, including nested inventories. New, unclaimed artifacts receive default paths; omitted old rows make no path claim.
 
-`UpdateDelivery(ctx, beforeRef, afterRef, file)` pins each registry operand once, reusing the captured read for identical reference strings. `UpdateDeliveryLayouts(ctx, beforePath, afterPath, file)` reads two local layouts without network access or credential files. `UpdateDeliveryRoots(ctx, beforeRoot, afterRoot, file)` uses caller-owned stores without closing or changing them. None writes the returned file.
-
-All return `DeliveryUpdateResult` with `Before`, `After`, a candidate `Delivery`, and sorted, nonnil `Changes` and `Conflicts`. Exact identities and one-to-one captured selector changes preserve authored paths. Selector sets include all nested inventories and remain separate by input, dependency and plugin role. Omitted old rows make no path claim; unclaimed refreshed artifacts receive default rows. No application-specific matching is performed.
-
-The old file must be bound to the old snapshot and contain only captured identities. Ambiguity returns `ErrConflict` with diagnostics and no candidate `Delivery`; other failures return an empty result and typed error. Read operations and cancellation retain their underlying causes. Caller files and descriptors remain unchanged.
-
-Update validates envelopes, interpreted Bale metadata and selected dependency JSON without refreshing sources, discovering referrers, executing plugins, publishing content, or checking opaque payload availability or integrity. Use `PlanPush` for complete local graph and destination-layout validation. See [delivery updates](delivery-updates.md) for conflict rules, partial files and CLI output.
+The old file must match the old snapshot and contain only captured identities. Ambiguity returns `ErrConflict` with diagnostics and no candidate `Delivery`; other failures return an empty result. Update validates metadata without reading opaque payloads or refreshing sources. Use `PlanPush` for full local graph validation before publication. See [delivery updates](delivery-updates.md) for matching and conflict rules.

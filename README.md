@@ -4,13 +4,13 @@ Bale bundles OCI images and artifacts for registry and offline transfer, preserv
 
 ## Install
 
-Install a published Linux AMD64 or ARM64 release:
+Install a Linux AMD64 or ARM64 release:
 
 ```sh
 curl -fsSL https://bale.strio.dev/install.sh | sh
 ```
 
-See [getting started](docs/getting-started.md) for exact versions, a custom install prefix and source builds.
+See [getting started](https://bale.strio.dev/getting-started/) for requirements, exact versions and alternative installs.
 
 ## Quick start
 
@@ -18,18 +18,17 @@ Save this as `bale.yaml`:
 
 ```yaml
 include:
-  - registry.example.com/apps/api:stable
+  - docker.io/library/busybox:1.37
 ```
 
-Create a bundle, pull it to a local OCI layout, then deliver it:
+Capture the image and save an offline archive:
 
 ```sh
-bale create -f bale.yaml registry.example.com/bundles/release:v1
-bale pull registry.example.com/bundles/release:v1 ./release
-bale push ./release mirror.example.com/releases/v1:bundle
+bale create --layout -f bale.yaml ./release
+bale save ./release -o release.tar
 ```
 
-See [getting started](docs/getting-started.md) for setup and a walkthrough. The [documentation](docs/index.md) covers recipes, inspection, dependency declarations, registry behavior and the Go SDK.
+Follow the [first-bundle tutorial](https://bale.strio.dev/tutorials/first-bundle/) to inspect, restore and deliver it. The [documentation](https://bale.strio.dev/) covers registry transfers, Helm, Flux and the Go SDK.
 
 ## Development
 

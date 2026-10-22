@@ -1,23 +1,34 @@
 # Recipes
 
-Recipes are authored in YAML; generated bundle metadata is JSON. Every source requires an explicit registry and tag or digest. Recipes select captured content; generated [delivery YAML](transfers.md#export-delivery-paths) controls where that content is pushed. Changing delivery paths does not require recapturing the recipe.
+A recipe selects what to capture. Write it in YAML; Bale stores the normalized recipe and captured inventory as JSON. Delivery paths belong in a separate [delivery file](transfers.md#export-delivery-paths), so choosing a destination does not require capturing again.
 
 ## Select references and tags
 
 ```yaml
 include:
   - registry.example.com/apps/api:stable
+  - ref: registry.example.com/apps/database:17
+    as: database
   - repository: registry.example.com/apps/worker
     tags: ["1.4", stable]
   - repository: registry.example.com/shared/tools
     tags: []
 ```
 
-A repository input requires `tags`. A nonempty list selects literal tags; `[]` captures all observed tags. `[all]` selects the literal tag named `all`. Creation pins the observed digests and preserves complete multiarchitecture graphs.
+| Field | Meaning |
+| --- | --- |
+| `include` | Required, nonempty list of inputs. A reference string is shorthand for `{ref: ...}`. |
+| `ref` | One artifact with an explicit registry and tag or digest. |
+| `repository` + `tags` | Repository without a tag/digest, plus required tag list. Use this instead of `ref`. |
+| `tags: []` | Capture all tags observed at creation. Nonempty lists select literal tags; `[all]` selects the tag named `all`. |
+| `as` | Optional unique display label for the input in capture previews. It does not set a delivery path or registry tag. |
+| `referrers` | Attachment inclusion policy; defaults to `include: all`, `require: []`. |
+| `dependencies` | Declaration-following policy; defaults to `follow: auto`. |
+| `plugin` | Optional OCI discovery plugin and its input. |
+
+Creation pins selected digests and preserves complete multiarchitecture graphs. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Unknown and duplicate YAML fields are rejected.
 
 ## Discover dependencies with a plugin
-
-Select an OCI discovery plugin on an input:
 
 ```yaml
 include:
@@ -28,34 +39,34 @@ include:
         schemaVersion: 1
         release: web
         namespace: production
-        values: {replicaCount: 2}
       blobs:
         chart:
           mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
 ```
 
-Creation resolves and runs the plugin automatically, then captures its graph and generated declaration with the discovered dependencies. It does not attach the declaration to the source artifact. `input` is a literal JSON object, defaults to `{}`, and may contain nested nulls, numbers and booleans. File paths have no special meaning.
+`plugin.ref` selects a plugin from your registry by tag or digest. These example coordinates are placeholders; publish the plugin before using them. Creation runs it automatically, then captures its graph, generated declaration and discovered dependencies without attaching metadata to the source artifact.
 
-Each `blobs` entry binds one top-level input field to exactly one artifact layer with the requested media type. Bale verifies and base64-encodes those bytes for the request. Bound fields cannot also appear in `input`. Do not combine a plugin with `dependencies.follow: none` or `dependencies.select`.
+`input` is a literal JSON object, defaults to `{}`, and accepts nested JSON values. File paths have no special meaning. Each `blobs` entry fills a top-level input field with verified, base64-encoded bytes from exactly one artifact layer matching `mediaType`. A bound field cannot also appear in `input`.
 
-Locked transfers do not execute plugins. Latest pull requires `--allow-plugins` to refresh a plugin recipe. See [dependency plugins](plugins.md) for publication, manual runs and runtime policy, or [Helm discovery](helm.md) for render-profile fields.
+A plugin cannot be combined with `dependencies.follow: none` or `dependencies.select`. Locked transfers do not run plugins; latest pull requires `--allow-plugins`. See [dependency plugins](plugins.md) for publishing and runtime limits, and [Helm discovery](helm.md) for its input fields.
 
 ## Select referrers
 
-Referrers default to `all`. An input can set `referrers.include: none` or require exact referrer digests with `referrers.require: [{digest: "sha256:..."}]`. Requirements remain mandatory with `none` and must match the selected subject in its source repository. Replace the abbreviated digest with a complete digest.
-
 ```yaml
+defaults:
+  referrers:
+    include: none
 include:
   - ref: registry.example.com/apps/api:stable
     referrers:
-      include: none
+      include: all
 ```
 
-Captured aliases must not overlap the standard referrer inventory tags reserved by Bale. This also applies to `tags: []`; see [registry behavior](registry.md).
+`defaults.referrers` applies to all inputs; per-input fields override inherited values. `include` accepts `all` or `none`. `require` is a list of `{digest: "sha256:..."}` entries using complete attachment manifest digests. Required referrers remain mandatory with `include: none` and must belong to the selected subject in its source repository. Setting `require` replaces the inherited list.
+
+Selected artifact tags must not overlap reserved referrer inventory tags, including when using `tags: []`; see [registry behavior](registry.md).
 
 ## Control dependency following
-
-Bale automatically follows one matching generic dependency declaration. Use `follow: none` to stop semantic expansion, or select a declaration when several match:
 
 ```yaml
 defaults:
@@ -71,6 +82,8 @@ include:
       follow: none
 ```
 
-Use `select: {digest: "sha256:..."}` with a complete digest instead of context to select an exact declaration manifest. Disabling following preserves mandatory OCI graph edges. Optional referrers are controlled separately: a declaration selected for dependency following is still captured with `referrers.include: none`.
+`auto` follows a single matching [dependency declaration](dependencies.md). Multiple matches require `select` with exactly one `context` or complete declaration manifest `digest`. `defaults.dependencies` applies across inputs; input fields override it. Explicit `follow: none` clears any inherited selection and cannot be combined with a new selection.
 
-See [dependency declarations](dependencies.md) for attachment authoring and recursive selection. [Locked and latest pulls](transfers.md#locked-and-latest-pulls) control whether a later pull uses captured resolutions or refreshes the recipe.
+Following declarations and including referrers are separate policies. A selected declaration is captured even with `referrers.include: none`; `dependencies.follow: none` stops declared dependency expansion while preserving mandatory OCI graph edges.
+
+See [bundle lifecycle](concepts/bundles.md) for captured content and [locked and latest pulls](transfers.md#locked-and-latest-pulls) for refreshing selectors.

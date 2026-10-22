@@ -1,28 +1,42 @@
 [project]
 site_name = "Bale"
 site_description = "Bundle OCI images and artifacts for registry and offline transfer."
+site_url = "https://bale.strio.dev/"
 repo_url = "https://github.com/strio-dev/bale"
 repo_name = "strio-dev/bale"
 nav = [
   { "Overview" = "index.md" },
   { "Getting started" = "getting-started.md" },
+  { "Tutorials" = [
+    { "First bundle" = "tutorials/first-bundle.md" },
+    { "Offline Helm application" = "examples/helm-offline/README.md" },
+  ] },
   { "Guides" = [
-    { "Helm" = "helm.md" },
-    { "Flux" = "flux.md" },
     { "Transfers" = "transfers.md" },
     { "Offline packaging" = "offline.md" },
     { "Delivery updates" = "delivery-updates.md" },
     { "Inspection" = "inspection.md" },
     { "Registry behavior" = "registry.md" },
+    { "Helm" = "helm.md" },
+    { "Flux" = "flux.md" },
+  ] },
+  { "Concepts" = [
+    { "How bundles work" = "concepts/bundles.md" },
   ] },
   { "Reference" = [
+    { "CLI conventions" = "reference/cli.md" },
     { "Recipes" = "recipes.md" },
     { "Dependency declarations" = "dependencies.md" },
     { "Dependency plugins" = "plugins.md" },
+    { "Plugin runtime" = "reference/plugin-runtime.md" },
+    { "Helm discovery" = "reference/helm-discovery.md" },
     { "Destination records" = "destinations.md" },
     { "Go SDK" = "sdk.md" },
   ] },
-  { "Contributing" = "contributing.md" },
+  { "Contributing" = [
+    { "Development" = "contributing.md" },
+    { "Test suites" = "development/testing.md" },
+  ] },
 ]
 
 [project.extra]

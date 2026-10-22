@@ -1,6 +1,6 @@
 # Delivery updates
 
-Carry edited publication paths onto a refreshed bundle without rebuilding the delivery file by hand. The old snapshot supplies the captured identities and selectors behind those edits; the new snapshot supplies the refreshed inventory.
+Carry edited publication paths onto a refreshed bundle. Keep both snapshots: the old delivery YAML names captured artifacts, but only the old bundle records which selectors chose them.
 
 ## Update a file
 
@@ -13,46 +13,44 @@ bale push ./refreshed mirror.example.com/releases/v1:bundle \
   --delivery refreshed.delivery.yaml --dry-run
 ```
 
-Registry references are supported too:
+Registry references work too:
 
 ```sh
 bale delivery update registry.example.com/bundles/release:v1 \
   registry.example.com/bundles/release:v2 \
-  --file old.delivery.yaml --output new.delivery.yaml
+  -f old.delivery.yaml -o new.delivery.yaml
 ```
 
-`--file/-f` must name delivery YAML bound to the old bundle. `--output/-o` is a new file; existing files, including the input, are never overwritten. Both operands are registry references by default or local OCI layouts with `--layout`. Keep the old captured snapshot available; the edited YAML alone cannot establish which tag previously selected an artifact.
+`--file/-f` selects YAML bound to the old bundle; `--output/-o` requires a new file. Both inputs are registry references unless `--layout` is set.
 
 ## Matching paths
 
-The output uses the existing [delivery YAML schema](transfers.md#export-delivery-paths) and binds it to the new bundle digest. Every refreshed artifact receives a row.
+The new [delivery file](transfers.md#export-delivery-paths) contains every refreshed artifact and binds to the new digest:
 
-- Exact source repository and digest identities retain their explicit paths.
-- A captured input, dependency or plugin selector can carry a path to a new digest when its old and new resolution sets each contain one artifact.
-- Repeated aliases deduplicate. Multiple old artifacts may converge on one target when their explicit paths agree.
-- Unclaimed artifacts receive default paths. Removed identities are reported; identities successfully moved to another digest appear as moves.
+- An exact repository/digest match retains its explicit path.
+- An input, dependency or plugin selector can carry a path to a changed digest when both resolution sets contain one artifact.
+- Repeated aliases deduplicate; several old artifacts can converge when their paths agree.
+- Unclaimed artifacts receive defaults, and removed artifacts are reported.
 
-Every row in the old file is an explicit path claim, including rows whose paths equal the defaults. Omitted rows make no claim. Repository-wide `push --map` settings are separate and are not carried into the file. Because the updated file contains the full inventory, its rows take precedence over later `--map` settings; omit a row from the new file to leave that artifact under repository-wide mapping.
+Every old row is an explicit claim, even if its path equals the default. Omitted rows make no claim. `push --map` settings are not carried forward; omit a new row if that artifact should use repository-wide mapping instead.
 
-Nested bundle inventories participate in exact matching. Original selector sets are aggregated across all captured snapshots by role and full reference. Bale never pairs snapshots or inputs by position. Differing nested captures can therefore make a selector ambiguous. Platform children, declarations and arbitrary referrers have no guaranteed original selector; changed artifacts without selector evidence are removed/defaulted rather than inferred from their type or position.
+Nested inventories participate in matching. Selector evidence is aggregated by role and full reference, never by input position; differing nested captures can make a selector ambiguous. Changed platform children, declarations and arbitrary referrers without selector evidence receive defaults rather than guessed paths.
 
 ## Resolve conflicts
 
-The command returns status 125 and writes no delivery file when an explicit path would split across targets, different paths converge on one target, or a changed selector has multiple possible resolutions. An artifact that survives exactly while its tag moves elsewhere also has two target claims and produces a conflict. Exact preservation does not silently override a competing tag-based claim.
+Bale writes no file if paths split across targets, differing paths converge, or selectors have multiple possible resolutions. An exact artifact that survives while its tag moves elsewhere can also have competing claims.
 
-The report identifies the old assignments, possible targets and selector evidence. To resolve ambiguity, make a copy of the old file and remove the disputed rows, run the update using that copy, then explicitly edit the new default paths. Review the resulting paths with `push --dry-run` before publication.
+The report shows the disputed assignments and selector evidence. Copy the old delivery file, remove disputed rows from the copy, then rerun the update. Edit the resulting defaults and review them with `push --dry-run`.
 
 ## Reports and validation
 
-The readable report labels changes as `preserved`, `moved`, `defaulted` or `removed`. Conflict targets have diagnostics instead of proposed path changes. Use JSON or a Go template for automation:
+The readable report labels paths `preserved`, `moved`, `defaulted` or `removed`. For automation:
 
 ```sh
 bale delivery update --layout ./locked ./refreshed \
-  -f old.yaml -o new.yaml --format json
+  -f bale.delivery.yaml -o refreshed.report.delivery.yaml --format json
 ```
 
-JSON contains `before`, `after`, `changes`, `conflicts` and a candidate `delivery` on success. Conflicts retain their report on stdout with status 125 and no candidate file. Invalid inputs, read failures and template errors return status 125 without a report. Successful updates return status 0.
+JSON includes `before`, `after`, `changes`, `conflicts` and, on success, a candidate `delivery`. Conflicts return a report with status 125 and no output file; invalid inputs or read/template failures return 125 without a report.
 
-Each registry operand resolves once; identical reference strings share one pinned read. Update validates OCI envelopes, interpreted Bale metadata and selected declaration JSON, including nested metadata, without refreshing sources, discovering attachments, executing plugins, publishing content, or reading or checking opaque configs and payload layers. Local updates make no network requests, read no registry credentials and leave layouts unchanged. Only the requested new output file is written.
-
-Metadata validation does not prove opaque payload availability or integrity. [Push planning](transfers.md#push-to-a-destination) verifies the complete local content and destination layout before publication.
+Update reads manifests and interpreted metadata, including nested bundles and selected declarations. It does not refresh selectors, run plugins or check opaque payloads. Registry references resolve once; local updates stay offline and leave both layouts unchanged. [Push preview](transfers.md#push-to-a-destination) validates the full local graph before publication.

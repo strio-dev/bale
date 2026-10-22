@@ -1,0 +1,48 @@
+# Test suites
+
+Run focused checks for the code you change, then `just check`. The root library, Helm discovery producer (`plugins/helm`) and native consumers (`plugins/helm-relocate`) are separate Go modules. `just test`, `just vet` and `just lint` cover all three.
+
+## Plugin and consumer builds
+
+| Command | Checks or output |
+| --- | --- |
+| `just helm-plugin-build` | Portable Helm discovery module. |
+| `just helm-plugin-check` | Built module through the offline capture workflow. |
+| `just helm-consumer-build` | Native Helm plugin package, with module tests, vet and lint. |
+| `just flux-service-build` | Flux adapter, with module tests, vet and lint. |
+| `just flux-image-build` | OCI image layout, including static linkage, CA roots and store-link checks. |
+| `just flux-chart-build` | Linted and packaged adapter chart. |
+
+Both discovery checks are required for producer changes and included in `just check`. See [Helm discovery](../reference/helm-discovery.md) and [consumer packaging](../helm.md#use-delivered-images-in-helm).
+
+## Registry acceptance
+
+```sh
+just registry-acceptance
+```
+
+The packaged CLI runs against native Distribution 3.1.2 and Zot 2.1.22 processes using temporary storage and loopback ports. No container runtime is required. This suite runs separately from `just check` and is included in CI.
+
+It covers capture, refresh, archive restoration, delivery and locked retrieval with source registries stopped. Cases include nested bundles, multiarchitecture images, declarations, portable discovery plugins and native Helm installation from delivered OCI packages. Publication failure/retry and tag conflicts check partial reports and completion ordering.
+
+An HTTPS/Basic-auth frontend checks client credentials and certificate trust. It does not test the registries' own authentication configuration. Registry cases render charts; live workloads belong to the Kubernetes suite.
+
+## Kubernetes acceptance
+
+```sh
+just kubernetes-acceptance
+```
+
+This optional suite requires **Linux AMD64 with readable and writable `/dev/kvm`**. The NixOS test VM uses four CPUs, 4 GiB RAM and a sparse 16 GiB disk. Nix fetches pinned tools and images before startup; containerd runs inside the VM. No host container runtime or Kubernetes context is needed.
+
+The suite captures and archives content, stops source registries, then delivers to a private-CA HTTPS registry. Native Helm and real Flux Operator deploy unchanged charts, exercise explicit custom-image overrides, upgrades and rollback, and compare running image digests. Failure cases cover credentials, CA trust, ambiguous records and registry outages. The upstream-chart case uses pinned Podinfo artifacts.
+
+To retain Kubernetes objects, logs, JSON results and JUnit output, choose a new directory:
+
+```sh
+nix run --no-update-lock-file path:.#kubernetes-acceptance -- --output result-kubernetes-acceptance
+```
+
+Evidence is under `evidence/`, with `junit.xml` alongside it. Without `--output`, temporary results are removed on exit. The driver cleans up the VM on success or failure.
+
+This suite stays outside `just check` and default CI. Manual CI can opt in through the `kubernetes` input on a runner with KVM. Controller/tool pins live in `nix/kubernetes-inputs.nix`; updates require refreshed hashes and a full run. See [private registry configuration](../flux.md#private-registry-configuration) for the separate consumer and node trust settings.

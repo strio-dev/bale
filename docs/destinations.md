@@ -1,66 +1,45 @@
 # Destination records
 
-Bundle push attaches a destination record to each captured application artifact at its primary delivery location. Consumers can find an artifact's delivered dependencies from the registry without retaining push output or changing the artifact's bytes.
+Bundle push attaches a destination record to each captured application artifact at its primary delivery location. The record lists that subject's captured direct dependencies and their delivered coordinates, with a digest reference to the full bundle. It is not another bundle, and the artifact's bytes remain unchanged.
 
 ```sh
 bale destinations inspect mirror.example.com/release/charts/web:1.4
-bale destinations inspect mirror.example.com/release/charts/web:1.4 \
-  -f '{{.Local}} {{.Record.Source}} {{.Record.Bundle}}'
 ```
 
-The default output is an indented JSON array, sorted by attachment digest. Each entry contains `repository`, `subject`, `descriptor`, `record` and `local`. Empty results are `[]`. Inspection validates all candidate metadata before returning output and does not contact the recorded source, bundle or dependency locations. Authentication and exact-host `--plain-http` options work as for other registry commands.
+Use the actual delivered reference. Inspection returns JSON records sorted by attachment digest, with `repository`, `subject`, `descriptor`, `record` and `local`; an empty inventory is `[]`. It validates metadata without contacting recorded source, bundle or dependency locations. See [CLI conventions](reference/cli.md) for authentication and formatting.
 
 ## Record format
 
-Artifact type: `application/vnd.bale.destination.v1+json`. Its OCI manifest has the delivered artifact as its exact `subject`, an empty JSON config and one JSON layer with that artifact type. Manifest and payload are each limited to 4 MiB. Registry JSON rejects unknown fields, duplicates, nulls and trailing data.
+The artifact type is `application/vnd.bale.destination.v1+json`. Its OCI manifest has the delivered artifact as its exact `subject`, an empty JSON config and one JSON layer with that artifact type. Both manifest and payload are limited to 4 MiB. Registry JSON rejects unknown fields, duplicate keys, nulls and trailing values.
 
-Example payload (replace abbreviated digests with complete values):
+| Payload field | Meaning |
+| --- | --- |
+| `schemaVersion` | `1`. |
+| `bundle` | Delivered bundle reference pinned by digest. |
+| `source` | Captured artifact's original repository and digest. |
+| `destination` | Same artifact digest at its primary delivered repository. |
+| `resolutions` | Captured dependency observations for this source identity. |
 
-```json
-{
-  "schemaVersion": 1,
-  "bundle": "mirror.example.com/release@sha256:<bundle>",
-  "source": "registry.example.com/charts/web@sha256:<chart>",
-  "destination": "mirror.example.com/release/charts/web@sha256:<chart>",
-  "resolutions": [
-    {
-      "capture": "sha256:<owning-bundle>",
-      "policy": {"follow": "auto"},
-      "outcome": "selected",
-      "declaration": {"digest": "sha256:<declaration>", "context": "production"},
-      "dependencies": [
-        {
-          "ref": "registry.example.com/images/web:stable",
-          "policy": {"follow": "none"},
-          "source": "registry.example.com/images/web@sha256:<image>",
-          "destination": "mirror.example.com/release/images/web@sha256:<image>"
-        }
-      ]
-    }
-  ]
-}
-```
+Each resolution contains its owning `capture` digest, dependency `policy` and `outcome`. A `selected` outcome includes the chosen `declaration` digest, optional context and direct `dependencies`. Each dependency retains its original `ref`, policy, pinned source and delivered destination.
 
-`bundle` identifies the delivered bundle by digest. `source` and `destination` identify the same unchanged artifact bytes in their respective repositories. Each resolution retains its owning capture digest, dependency policy and selected declaration, including context. Nested bundles keep separate capture scopes; their resolutions are not combined into a single inferred dependency set.
+An `absent` outcome means capture found no matching declaration; `disabled` records explicit opt-out. Both have empty dependency arrays and no declaration. Empty `resolutions` means no semantic observation was captured, rather than proving there are no dependencies.
 
-Dependencies are direct: a chart record lists its declared image destinations, while an image's own dependencies belong in its record. `ref` retains the original selector; `source` pins the captured result and `destination` identifies its confirmed primary placement. Repository identity matters even when digests match. Equivalent entries are deduplicated and metadata has no timestamps or generated IDs.
-
-An `absent` resolution means capture found no matching declaration. `disabled` records explicit opt-out. Both have empty dependency arrays and no declaration. An empty `resolutions` array means no semantic observation was captured for that source identity; it does not establish that the artifact has no dependencies.
+Nested bundles retain separate capture scopes. A chart record lists its direct image dependencies; an image's own dependencies belong in that image's record. Source repository identity matters even when digests match. Equivalent entries are deduplicated; records contain no timestamps or generated IDs.
 
 ## Selecting records
 
-`local` is true when the record's destination matches the repository and digest being inspected. Transferring an artifact again can carry older records alongside the new one; inspection returns them all and chooses no newest record.
+`local` matches the repository and digest being inspected. Older transferred records can coexist with local records; inspection does not choose a newest record.
 
-Select the intended local record by pinned bundle and source identity, then choose its capture, policy and declaration or context. Reject ambiguous choices. Two source repositories containing identical bytes can produce multiple local records for the same destination, even within one delivery.
+Select by local destination, pinned bundle and source, then by capture and declaration digest or context. Reject ambiguous matches. Identical bytes from two source repositories can produce multiple local records at one destination, even within a single delivery.
 
-The [native Helm integration](helm.md#use-delivered-images-in-helm) reads attachments automatically and applies their pinned image destinations during rendering. Its offline filter also accepts this inspection JSON. [Flux consumption](flux.md) supplies mappings through Flux Operator. Both require one matching local attachment and one selected resolution, rejecting ambiguous choices. The chart archive remains unchanged. [Producer declarations](dependencies.md) determine capture; destination records report the resulting placements and do not participate in dependency selection.
+The [Helm integration](helm.md#use-delivered-images-in-helm) reads these attachments and maps rendered image references; its offline filter also accepts inspection JSON. [Flux consumption](flux.md) supplies mappings through Flux Operator. Both require one matching local attachment and one selected resolution. [Producer declarations](dependencies.md) control capture; destination records report the resulting placements.
 
 ## Publication and limits
 
-Planning creates deterministic records and checks their registry tag reservations before writes. Push copies and verifies the complete artifact and bundle graphs first, then publishes records and confirms their referrer discovery, then publishes aliases and the completion tag. A failure can leave copied content or records behind. Retrying reproduces the same attachment digests and repairs interrupted discovery; publication across repositories is not atomic.
+Push verifies complete artifact and bundle graphs, publishes records and confirms referrer discovery, then publishes aliases and the completion tag. Planning checks record and tag reservations before writes. Failures can leave content or records behind; retries reproduce the same record digests and repair interrupted discovery. Publication across repositories is not atomic.
 
-Records cover captured manifest and index identities, including platform manifests and nested bundle roots, at their canonical locations. Extra copies required for OCI graph and referrer colocation receive no additional record. Bale declaration metadata, bundle inventory metadata and destination records themselves receive no generated record. Selected historical records remain ordinary opaque attachments during transfer.
+Records cover captured manifests and indexes, including platform manifests and nested bundle roots, at canonical locations. Extra copies needed for graph/referrer colocation receive no extra record. Bale declarations, inventory metadata and destination records themselves receive none. Historical records can still transfer as opaque attachments.
 
-These records describe verified mappings at publication time. Reading one does not prove that its bundle completed, targets remain available, or the publisher is trusted. Recorded locations are JSON metadata, not OCI graph edges or independent garbage-collection roots. Retention and signature verification remain separate concerns; see [registry behavior](registry.md).
+A record describes a verified mapping at publication time. It does not prove bundle completion, continued availability or publisher trust. References inside its JSON are metadata, not OCI graph edges or garbage-collection roots; see [registry behavior](registry.md) for retention.
 
-Only bundle `Push` creates these records. Direct SDK `Plan`/`Execute` transfers do not have captured dependency resolutions. See the [SDK](sdk.md#inspect-delivered-destinations) for programmatic access.
+Only bundle `Push` generates destination records; direct `Plan`/`Execute` lacks captured dependency resolutions. See the [SDK](sdk.md#inspect-delivered-destinations) for inspection, bounded reads and JSON codecs.

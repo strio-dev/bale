@@ -1,19 +1,19 @@
-# Flux
+# Deploy with Flux
 
-`bale-flux` reads destination attachments and serves chart inputs to [Flux Operator's ExternalService provider](https://fluxoperator.dev/docs/crd/resourcesetinputprovider/#type). A ResourceSet creates ordinary digest-pinned OCIRepository and HelmRelease resources. Charts stay unchanged, and Bale push runs no integration code. This requires Flux Operator in addition to Flux; stock Flux does not discover Bale attachments.
+Use `bale-flux` to turn a delivered chart's destination attachments into Flux inputs. A Flux Operator ResourceSet creates a digest-pinned OCIRepository and a HelmRelease with image mappings; chart bytes stay unchanged.
 
-## Package and install
+This integration requires [Flux Operator](https://fluxoperator.dev/) in addition to Flux. Install those controllers first. The commands below also require Helm 4, Skopeo and kubectl with access to your cluster. The adapter reads registry metadata; Flux renders and deploys the chart.
 
-Build the OCI image layout and Helm chart from the checkout:
+## Build and deliver the adapter
+
+From a Bale checkout with [Nix set up](contributing.md), build the service image and bootstrap chart:
 
 ```sh
 just flux-image-build
 just flux-chart-build
 ```
 
-Nix packages the static service binary, CA certificates and license without running containers. Skopeo converts the locally built archive into a standard OCI image layout. The image runs as UID/GID 65532 and contains no shell, credential helpers or Nix store closure. Each native build produces one Linux platform image; the flake offers AMD64 and ARM64 targets.
-
-Publish development artifacts to your source registry with Skopeo and Helm:
+These builds need no container runtime. The image targets the current Linux platform; the flake supports AMD64 and ARM64. Publish your development artifacts with Skopeo and Helm 4:
 
 ```sh
 skopeo copy oci:result-flux-service-image:dev \
@@ -22,19 +22,33 @@ helm push result-flux-service-chart/bale-flux-0.0.0-dev.tgz \
   oci://registry.example.com/charts
 ```
 
-Replace the source registry names in the [example recipe](examples/flux-bootstrap/bale.yaml). The recipe includes the chart and service image explicitly; bootstrap needs no discovery plugin or native Helm integration. Deployment values stay separate from capture.
+Copy the [bootstrap recipe](examples/flux-bootstrap/bale.yaml) to `bale.yaml` and replace its registry names with your published references. The recipe explicitly includes both artifacts; bootstrap needs no discovery plugin.
 
 ```sh
 bale create --layout -f bale.yaml bootstrap --output-delivery bale.delivery.yaml
 ```
 
-In the generated delivery file, set the chart path to `charts/bale-flux` and the service image path to `images/bale-flux`. Then deliver to the chosen registry:
+Set `charts/bale-flux` and `images/bale-flux` as their paths in the generated delivery file, then push:
 
 ```sh
 bale push bootstrap mirror.example.com/release:bootstrap --delivery bale.delivery.yaml
 ```
 
-After delivery, write [installation values](examples/flux-bootstrap/values.yaml) with `image.repository: mirror.example.com/release/images/bale-flux` and `image.tag: dev`, adapting the destination to your push. Bale does not generate these values. Create the `flux-system` namespace and referenced Secrets, then a ConfigMap containing your destination release allowlist:
+## Configure and install
+
+Write `releases.yaml` with the delivered application charts the adapter may resolve:
+
+```yaml
+releases:
+  - name: web
+    chart: mirror.example.com/release/charts/web:1.4
+    selection:
+      context: production
+```
+
+Each chart must already have a delivered destination attachment. Selectors use the [Helm selection rules](helm.md#selection-and-validation): exactly one local attachment and one captured dependency resolution. Add `bundle`, `source`, `capture` or `declaration` when needed. Selection never chooses the newest record or unions captures. Requests cannot override this allowlist.
+
+Copy the [bootstrap values](examples/flux-bootstrap/values.yaml) to `values.yaml`. Set the service image to its destination repository and tag. Create the `flux-system` namespace and the [referenced credentials and TLS Secrets](#private-registry-configuration), then install:
 
 ```sh
 kubectl -n flux-system create configmap bale-flux-releases --from-file=releases.yaml
@@ -42,28 +56,42 @@ helm upgrade resolver oci://mirror.example.com/release/charts/bale-flux:0.0.0-de
   --install --namespace flux-system --values values.yaml --wait
 ```
 
-Plain Helm uses the destination image from `values.yaml`, bootstrapping the resolver without contacting the source registry. The chart mounts its allowlist and existing Secrets, provides a cluster-internal Service, and runs with a read-only root and writable home. It installs no Flux Operator, provider, ResourceSet or RBAC.
+For a private registry CA, add Helm's `--ca-file registry-ca.crt` and [log in first](helm.md#private-registry-access). Plain Helm bootstraps the adapter using the destination image you supplied in values.
 
-With release name `resolver`, the Service is `resolver-bale-flux.flux-system.svc:8080`. The example values enable HTTPS and bearer authentication. The TLS certificate must cover that Service DNS name; configure the provider URL, token and CA accordingly. Kubernetes image-pull Secrets (`imagePullSecrets`) and resolver registry credentials (`registry.existingSecret`) are separate. The image cannot invoke external credential helpers; provide auth entries in its mounted JSON.
+The example exposes `https://resolver-bale-flux.flux-system.svc:8080` with bearer authentication. Its certificate must cover that Service DNS name. The chart installs the Deployment and internal Service; install Flux Operator, providers and ResourceSets separately.
 
-The service reads files at startup. Chart-managed allowlist changes trigger a rollout; restart the Deployment after updating an external ConfigMap or any mounted Secret. See the [chart values reference](https://github.com/strio-dev/bale/tree/main/charts/bale-flux) for all mounts and settings.
+Files load at startup. Chart-managed allowlist changes trigger a rollout; restart the Deployment after changing an external ConfigMap or mounted Secret. `/healthz` checks the serving process without authentication or registry access, so registry failures do not restart it. See the [chart settings](https://github.com/strio-dev/bale/tree/main/charts/bale-flux) for all mounts and values.
 
-Readiness and liveness probes use `/healthz` over HTTP or HTTPS to match the listener. This endpoint needs no bearer token and performs no registry requests; registry failures do not restart a healthy resolver.
+## Connect Flux Operator
+
+Copy and edit the [provider and ResourceSet example](https://github.com/strio-dev/bale/blob/main/plugins/helm-relocate/examples/flux/resources.yaml). Set the provider URL to `https://resolver-bale-flux.flux-system.svc:8080/inputs/web` and adapt its namespace, chart values and Secret names, then apply your file:
+
+```sh
+kubectl apply -f resources.yaml
+```
+
+The ResourceSet waits for the digest-pinned OCIRepository, then updates the stable HelmRelease's `chartRef` and image post-renderers together. Keep normal HelmRelease settings and values in that template. For custom deployment images, include them explicitly in the bundle and set their destination references in `HelmRelease.spec.values`.
+
+Give each release one owning ResourceSet and a distinct release name in its namespace. Git manages the provider and ResourceSet; Flux Operator manages their generated resources. Do not manage those generated objects separately. Old sources are pruned after the final step is applied, before the HelmRelease becomes ready; the previous source is not retained until upgrade success.
+
+`GET /inputs/web` resolves one configured release; `GET /inputs` resolves all atomically. For the aggregate endpoint, set the provider's `spec.filter.limit` to at least your release count: Flux Operator's default is 100, while the adapter permits 256.
+
+Missing or ambiguous attachments, registry errors, timeouts and oversized responses fail the request. The adapter never returns a successful empty set or partial result. Flux Operator retains its last successful exported inputs on fetch failure, preserving the previous release inputs.
 
 ## Private registry configuration
 
-For a destination such as `mirror.example.com` with a private CA, configure each client that connects to it:
+Configure each connection independently:
 
-| Client | Credentials | Registry CA trust |
+| Client | Credentials | CA trust |
 | --- | --- | --- |
-| `helm bale` | Helm registry configuration | `--ca-file` on each chart operation |
-| Resolver | `registry.existingSecret` and `configKey` | `registry.ca.existingSecret` |
-| Flux source-controller | OCIRepository `secretRef` | OCIRepository `certSecretRef` |
-| Kubelet/container runtime | Pod `imagePullSecrets` | Node container-runtime configuration |
+| Adapter → registry | `registry.existingSecret` and `configKey` | `registry.ca.existingSecret` |
+| Flux source-controller → registry | OCIRepository `secretRef` | OCIRepository `certSecretRef` |
+| Kubelet → registry | Pod `imagePullSecrets` | Node container-runtime trust |
+| Provider → adapter | Provider `secretRef` with `token` | Provider `certSecretRef` |
 
-Start with a Docker-compatible `registry-config.json` containing `auths` entries for the destination host, including its port if present, and the PEM CA file `registry-ca.crt`. The JSON mounted in Kubernetes must contain credentials directly; helper-only configurations cannot run inside the resolver image. Use a registry account scoped to the required repositories. Keep these files and Secrets outside the bundle and Git.
+Provision `registry-config.json` with Docker-compatible `auths` entries for the exact destination host, including its port. The adapter image cannot run credential helpers: mount actual credentials scoped to the required repositories. Provision `registry-ca.crt` separately. Keep credentials, tokens and private keys outside bundles and Git.
 
-Create the credentials in both namespaces used by this example. The same Secret can serve the resolver, Flux and Pod pulls when they use the same registry account:
+For a fresh deployment using `flux-system` and `apps`:
 
 ```sh
 kubectl create namespace flux-system
@@ -77,23 +105,11 @@ for namespace in flux-system apps; do
 done
 ```
 
-Skip namespace creation if it already exists. The [bootstrap values](examples/flux-bootstrap/values.yaml) select `.dockerconfigjson` as the resolver's mounted config key, mount the registry CA, and set its own Pod's `imagePullSecrets`. The [ResourceSet example](https://github.com/strio-dev/bale/blob/main/plugins/helm-relocate/examples/flux/resources.yaml) sets the generated OCIRepository's credential and CA references. Flux accepts a CA-only Secret under `certSecretRef`; client certificates are needed only when the registry requires mutual TLS. See [Flux registry authentication](https://fluxcd.io/flux/components/source/ocirepositories/#secret-reference) and [TLS configuration](https://fluxcd.io/flux/components/source/ocirepositories/#mutual-tls-authentication).
+Skip namespace creation if it already exists. The bootstrap values mount `.dockerconfigjson` and the CA into the adapter and set its own Pod's `imagePullSecrets`. The ResourceSet example configures the generated OCIRepository. Flux accepts a CA-only Secret through `certSecretRef`; supply client certificates too if your registry requires mutual TLS. See [Flux authentication](https://fluxcd.io/flux/components/source/ocirepositories/#secret-reference) and [TLS configuration](https://fluxcd.io/flux/components/source/ocirepositories/#mutual-tls-authentication).
 
-Workload pull Secrets must exist in the Pod's namespace. Adapt `HelmRelease.spec.values.imagePullSecrets` to the actual chart: hook Jobs and subcharts may expose separate settings. Bale relocates image references; it does not inject pull credentials. See [Kubernetes private image pulls](https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/).
+Workload pull Secrets must exist in each Pod's namespace. Adapt the chart's values, including hook and subchart settings; Bale does not inject credentials. Install the registry CA in every relevant node's runtime trust configuration. Pod Secrets do not configure node trust. Use your cluster's node-management mechanism and the runtime's [registry configuration](https://github.com/containerd/containerd/blob/f2551031d7276a770f65f98c9b52e57e7dad07e8/docs/hosts.md#cri).
 
-Install `registry-ca.crt` in the container runtime's trust configuration on every node that may run these Pods. A Pod Secret does not configure node trust. For containerd 2.x, enable `config_path = "/etc/containerd/certs.d"` under `[plugins."io.containerd.cri.v1.images".registry]`, then provision `/etc/containerd/certs.d/mirror.example.com/hosts.toml`:
-
-```toml
-server = "https://mirror.example.com"
-
-[host."https://mirror.example.com"]
-  capabilities = ["pull", "resolve"]
-  ca = "/etc/containerd/certs.d/mirror.example.com/ca.crt"
-```
-
-Copy the registry CA to that `ca` path and include the registry port in the directory and URLs when applicable. Apply this through your cluster's node configuration; changing containerd's main configuration may require a restart. The [containerd 2.4.1 registry guide](https://github.com/containerd/containerd/blob/f2551031d7276a770f65f98c9b52e57e7dad07e8/docs/hosts.md#cri) describes the runtime settings.
-
-Resolver HTTPS is a separate connection. With the bootstrap Service URL `https://resolver-bale-flux.flux-system.svc:8080/inputs/web`, create its server certificate Secret, matching bearer token Secrets, and provider CA Secret from locally provisioned files:
+For provider → adapter HTTPS, provision `resolver.crt`, `resolver.key`, `resolver-ca.crt` and `resolver-token`. The certificate must cover `resolver-bale-flux.flux-system.svc`:
 
 ```sh
 kubectl -n flux-system create secret tls bale-resolver-tls \
@@ -106,61 +122,32 @@ kubectl -n apps create secret generic bale-resolver-ca \
   --from-file=ca.crt=resolver-ca.crt
 ```
 
-The server certificate must cover `resolver-bale-flux.flux-system.svc`. Set that URL in the provider example; its `secretRef` and `certSecretRef` use the token and CA in `apps`. These are independent of the registry credentials and registry CA. Finally, install the bootstrap chart with the [Helm credential and CA options](helm.md#private-registry-access), then apply the provider and ResourceSet.
+The provider uses the token and CA Secrets in `apps`; the adapter uses the matching token and server certificate in `flux-system`. These differ from registry credentials and CA trust. Provider `insecure: true` permits plain HTTP for local tests; it does not disable TLS verification.
 
 ## Run the binary directly
 
-Build the native service:
+For an existing host deployment, build the native service and use the same allowlist:
 
 ```sh
 nix build --no-update-lock-file path:.#flux-service --out-link result-flux-service
-```
-
-Write `releases.yaml` with the delivered charts the service may resolve:
-
-```yaml
-releases:
-  - name: web
-    chart: mirror.example.com/release/charts/web:1.4
-    selection:
-      context: production
-```
-
-Start the service:
-
-```sh
 result-flux-service/bin/bale-flux --config releases.yaml \
-  --listen 127.0.0.1:8080 \
-  --registry-config /run/secrets/registry/config.json
+  --listen 127.0.0.1:8080 --registry-config /run/secrets/registry/config.json
 ```
 
-`GET /inputs/web` resolves one configured release; `GET /inputs` resolves all configured releases atomically. Requests cannot override the allowlist or selectors. Tags are resolved once per request. Selection uses the same rules as the [Helm integration](helm.md#selection-and-validation): one local attachment and one captured dependency resolution. Add `bundle`, `source`, `capture`, `declaration` or `context` under `selection` when necessary. There is no newest-record policy or capture union.
-
-For the aggregate `/inputs` endpoint, set the provider's `spec.filter.limit` to at least the configured release count (up to 256). Flux Operator otherwise truncates to its default limit of 100. The single-release example uses `/inputs/web`.
-
-For network access, configure `--tls-cert-file`, `--tls-key-file` and `--bearer-token-file`, or terminate TLS at your ingress. Registry trust uses separate `--ca-file`, `--cert-file` and `--key-file` options. Repeated `--plain-http HOST` permits HTTP only for those registry hosts. Configuration is loaded at startup; restart the service after changing it. Resolution failures return non-success HTTP responses and write detailed diagnostics to stderr.
-
-## Connect Flux Operator
-
-The complete [provider and ResourceSet example](https://github.com/strio-dev/bale/tree/main/plugins/helm-relocate/examples/flux) has two steps:
-
-1. Create an OCIRepository named from the release identity, chart repository and digest, then wait until it is ready.
-2. Update the stable HelmRelease's `chartRef` and image post-renderers together.
-
-Keep chart values and normal HelmRelease settings in the ResourceSet template. Git owns the provider and ResourceSet; Flux Operator owns their generated resources. Give each release one owning ResourceSet and a distinct release name in its namespace. Do not separately manage generated objects from Git or share their ownership across ResourceSets. Old sources are pruned after the final step is applied, before the final HelmRelease becomes ready. This does not retain the previous source until an upgrade succeeds. A source changes identity when its release, repository or digest changes; a different capture of the same chart updates the post-renderers on the existing release.
-
-Configure credentials separately for the provider's HTTP call, the resolver's registry access, and Flux source-controller's chart retrieval. Workload image-pull credentials remain a cluster concern. The provider Secret uses a `token` entry matching the resolver token file. Its `certSecretRef` can configure a private CA. Provider `insecure: true` permits plain HTTP for local tests; it does not disable TLS certificate verification.
-
-Missing attachments, ambiguous selection, registry failures, timeouts and oversized responses fail the entire request. The service never returns a successful empty input set. Flux Operator retains its last successful exported inputs on fetch failure, so a metadata failure does not ask it to prune the previous release.
+The registry config path must contain your provisioned credentials. For network access, set `--tls-cert-file`, `--tls-key-file` and `--bearer-token-file`, or terminate TLS at an ingress. Registry TLS uses separate `--ca-file`, `--cert-file` and `--key-file` options. Repeated `--plain-http HOST` permits HTTP for those exact registry hosts. Restart after config changes; resolution diagnostics go to stderr.
 
 ## Coverage and limits
 
-The adapter emits native Kustomize image rules for exact captured references, including distinct tags in one repository, pinned digests and Docker Hub shorthand aliases. Flux's renderer handles the supported workload image fields and hooks. As with the native Helm filter, **unmapped images remain unchanged**.
+The adapter emits exact Kustomize image rules for captured references, distinct tags, pinned digests and Docker Hub shorthand. Flux rewrites supported workload fields and hooks; valid unmapped images stay unchanged. Custom resource fields need a schema-aware consumer. Bale neither reads deployment values during capture nor verifies that every override image was included.
 
-For images introduced by custom deployment values, add ordinary recipe `include` entries before capture and set `HelmRelease.spec.values` to their transferred locations after delivery. No extra chart attachment is needed for these overrides. Discovery can use the chart defaults. Bale does not read deployment values, generate destination values or verify that every override was captured. Other custom resource fields need a consumer that understands their schema.
+The integration targets Flux Operator **0.61.0**, helm-controller **1.6.5** and Kustomize API **0.21.1**. Exact matching depends on that Kustomize implementation; qualify controller upgrades against your chart profiles.
 
-The integration targets Flux Operator **0.61.0**, helm-controller **1.6.5**, and its Kustomize API **0.21.1**. Exact reference matching relies on that Kustomize implementation's regular expression behavior. Qualify controller upgrades against your chart profiles.
+| Limit | Value |
+| --- | --- |
+| Configuration | 1 MiB; 256 releases |
+| Chart metadata inspection | 256 advertised referrers; 4 MiB inventory and attachment reads |
+| Serialized destination records | 4 MiB |
+| Resolution | 30 seconds per request; 16 concurrent requests |
+| Response | 900 KiB; no partial success |
 
-Configuration is limited to 1 MiB and 256 named releases. Each chart inspection permits at most 256 advertised referrers and 4 MiB of inventory and attachment reads, including validation rereads. Its serialized records have a separate 4 MiB limit. These are metadata budgets, not process memory limits. Each request has a 30-second resolution timeout, a 900 KiB response limit, and no partial successful result. At most 16 requests resolve concurrently; excess requests receive HTTP 503. There is no chart renderer, container runtime, Wasm runtime, or cluster API client in the service.
-
-The optional [Kubernetes acceptance command](contributing.md#kubernetes-acceptance) exercises the packaged service and real Flux Operator against an authenticated HTTPS registry with a private CA. It checks image identity, A→B→A, credential failure and recovery, cached-image pull authentication, TLS/token handling and ambiguous-attachment preservation.
+Excess concurrent requests receive HTTP 503. These are metadata and request budgets, not process memory limits. The service reads attachments; it contains no chart renderer, container runtime, Wasm runtime or cluster API client.

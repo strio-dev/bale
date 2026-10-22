@@ -150,6 +150,13 @@ jobs:
             localhost/bale:nix --version
           docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
             localhost/bale:nix --help
+          nix build --out-link result-helm-plugin --no-update-lock-file path:.#helm-plugin
+          fixture=$(mktemp -d "$RUNNER_TEMP/bale-fixture.XXXXXX")
+          cp result-helm-plugin/lib/bale/plugins/helm.wasm "$fixture/helm.wasm"
+          python3 -c 'import base64,json,pathlib,sys; print(json.dumps({"schemaVersion":1,"chart":base64.b64encode(pathlib.Path(sys.argv[1]).read_bytes()).decode(),"release":"web","namespace":"apps"}))' \
+            tests/integration/testdata/helm/podinfo-6.9.4.tgz > "$fixture/request.json"
+          chmod 755 "$fixture"
+          chmod 644 "$fixture/helm.wasm" "$fixture/request.json"
           for identity in default arbitrary; do
             workspace=$(mktemp -d "$RUNNER_TEMP/bale-work.XXXXXX")
             chmod 1777 "$workspace"
@@ -161,12 +168,12 @@ jobs:
             fi
             docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
               "${user_args[@]}" --volume "$workspace:/work" \
-              --volume "$GITHUB_WORKSPACE/internal/wasm/testdata:/fixtures:ro" \
+              --volume "$fixture:/fixtures:ro" \
               localhost/bale:nix dependencies generate \
-              --plugin-file /fixtures/rust-producer.wasm --input /fixtures/request.json \
+              --plugin-file /fixtures/helm.wasm --input /fixtures/request.json \
               --plugin-cache /work/cache > "$workspace/dependencies.yaml"
             test -s "$workspace/dependencies.yaml"
-            grep -Fq 'registry.example.test/artifacts/z:stable' "$workspace/dependencies.yaml"
+            grep -Fq 'ghcr.io/stefanprodan/podinfo:6.9.4' "$workspace/dependencies.yaml"
             test "$(sudo stat -c '%u:%g %a' "$workspace/cache")" = "$expected_owner 700"
             test -n "$(sudo find "$workspace/cache" -maxdepth 1 -type f -name '*.native' -size +0c -print -quit)"
           done
@@ -409,12 +416,13 @@ jobs:
             const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
             core.setOutput('current', latest.tag_name === process.env.GITHUB_REF_NAME);
       - name: Update latest container alias
-        if: needs.matrix.outputs.prerelease != 'true' && (steps.state.outputs.published != 'true' || steps.latest.outputs.current == 'true')
+        if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published != 'true'
         env:
           PUBLISHED_DIGEST: ${{ steps.container.outputs.digest }}
         run: |
-          digest="$PUBLISHED_DIGEST"
-          if [ -z "$digest" ]; then
-            digest=$(nix develop --no-update-lock-file path:.#release --command regctl image digest "$IMAGE:$IMAGE_TAG")
-          fi
+          nix develop --no-update-lock-file path:.#release --command regctl image copy "$IMAGE@$PUBLISHED_DIGEST" "$IMAGE:latest"
+      - name: Retry latest container alias
+        if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published == 'true' && steps.latest.outputs.current == 'true'
+        run: |
+          digest=$(nix develop --no-update-lock-file path:.#release --command regctl image digest "$IMAGE:$IMAGE_TAG")
           nix develop --no-update-lock-file path:.#release --command regctl image copy "$IMAGE@$digest" "$IMAGE:latest"

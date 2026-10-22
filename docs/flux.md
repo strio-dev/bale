@@ -13,12 +13,14 @@ just flux-image-build
 just flux-chart-build
 ```
 
-These builds need no container runtime. The image targets the current Linux platform; the flake supports AMD64 and ARM64. Publish your development artifacts with Skopeo and Helm 4:
+These builds need no container runtime. The image targets the current Linux platform; the flake supports AMD64 and ARM64. Publish your development artifacts with the pinned release tools:
 
 ```sh
-skopeo copy oci:result-flux-service-image:dev \
+nix develop --no-update-lock-file path:.#release --command \
+  skopeo copy oci:result-flux-service-image:dev \
   docker://registry.example.com/images/bale-flux:dev
-helm push result-flux-service-chart/bale-flux-0.0.0-dev.tgz \
+nix develop --no-update-lock-file path:.#release --command \
+  helm push result-flux-service-chart/bale-flux-0.0.0-dev.tgz \
   oci://registry.example.com/charts
 ```
 

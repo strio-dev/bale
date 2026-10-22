@@ -16,17 +16,15 @@ to its vendored Helm dependency, verifies the vendor hash and builds with
 builder without a fork, Python or changes to the Go module cache. See the
 [patch notes](../../nix/patches/README.md) for scope and upgrade checks.
 
-For development, build and test from this directory:
+Run the producer tests and packaged discovery checks from the repository root:
 
 ```sh
-CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -trimpath -o helm.wasm ./cmd/bale-helm
-go test ./...
+just test
+just helm-plugin-check
 ```
 
-These direct Go commands use unmodified Helm. The resulting Wasm includes the
-larger client dependency graph; `helm_offline` is available only in the patched
-Nix build. Nix also runs native checks without the offline tag, preserving Helm's
-client APIs in that build.
+The canonical Nix build uses the offline Helm dependency graph. Its native
+checks also preserve coverage of Helm's unmodified client APIs.
 
 Send one UTF-8 JSON request on standard input, with the packaged chart encoded as
 base64. Successful standard output is the bare declaration:

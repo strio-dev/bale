@@ -8,6 +8,7 @@
   distribution,
   zot,
   writeShellApplication,
+  bale-cli ? "${bale}/bin/bale",
 }:
 let
   tests = bale.overrideAttrs {
@@ -29,7 +30,7 @@ in
 writeShellApplication {
   name = "bale-registry-acceptance";
   text = ''
-    export BALE_ACCEPTANCE_BINARY=${bale}/bin/bale
+    export BALE_ACCEPTANCE_BINARY=${bale-cli}
     export BALE_ACCEPTANCE_DISTRIBUTION=${distribution}/bin/registry
     export BALE_ACCEPTANCE_ZOT=${zot}/bin/zot
     export BALE_ACCEPTANCE_HELM_PLUGIN=${helm-plugin}/lib/bale/plugins/helm.wasm

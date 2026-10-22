@@ -57,10 +57,11 @@ func main() {
 }
 ```
 
-Compile it with Go's standard WASI target:
+From a Bale checkout, compile it with the pinned Go toolchain's standard WASI target:
 
 ```sh
-GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o references.wasm references.go
+nix develop --no-update-lock-file path:.#runtime --command \
+  env GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o references.wasm references.go
 ```
 
 Save this as `request.json`:

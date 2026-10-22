@@ -1,9 +1,7 @@
 set default-list
 
 test:
-    nix develop path:. -c go test ./...
-    nix develop path:. -c sh -c 'cd plugins/helm && go test ./...'
-    nix develop path:. -c sh -c 'cd plugins/helm-relocate && go test ./...'
+    nix run --no-update-lock-file path:.#dev-test
 
 helm-plugin-build:
     nix build --no-update-lock-file path:.#helm-plugin --out-link result-helm-plugin
@@ -24,32 +22,28 @@ flux-chart-build:
     nix build --no-update-lock-file path:.#flux-service-chart --out-link result-flux-service-chart
 
 registry-acceptance:
-    nix run --no-update-lock-file path:.#registry-acceptance
+    nix build --no-update-lock-file path:.#checks.{{ arch() }}-linux.registry-acceptance --no-link
 
 kubernetes-acceptance:
     nix run --no-update-lock-file path:.#kubernetes-acceptance
 
 vet:
-    nix develop path:. -c go vet ./...
-    nix develop path:. -c sh -c 'cd plugins/helm && go vet ./...'
-    nix develop path:. -c sh -c 'cd plugins/helm-relocate && go vet ./...'
+    nix run --no-update-lock-file path:.#dev-vet
 
 lint:
-    nix develop path:. -c golangci-lint run
-    nix develop path:. -c sh -c 'cd plugins/helm && golangci-lint run'
-    nix develop path:. -c sh -c 'cd plugins/helm-relocate && golangci-lint run'
+    nix run --no-update-lock-file path:.#dev-lint
 
 fmt:
-    nix develop path:. -c gofmt -w *.go cmd internal plugin tests
-    nix develop path:. -c gofmt -w plugins/helm plugins/helm-relocate
-    nix develop path:. -c nixfmt flake.nix nix/*.nix
-    nix develop path:. -c just --fmt
+    nix run --no-update-lock-file path:.#dev-fmt
 
 check:
     nix flake check path:. --no-update-lock-file
 
 build:
-    nix build path:.#bale --out-link result-bale
+    nix build --no-update-lock-file path:.#bale --out-link result-bale
+
+container-acceptance:
+    nix build --no-update-lock-file path:.#checks.x86_64-linux.container-acceptance --no-link
 
 container-build:
     nix build --no-update-lock-file path:.#container --out-link result-container
@@ -58,15 +52,13 @@ release-check:
     nix flake check . --no-update-lock-file
 
 release-build:
-    nix build path:.#release-binary --out-link result-release
+    nix build --no-update-lock-file path:.#release-binary --out-link result-release
 
 scan:
-    nix develop path:.#security -c semgrep scan --error --strict --exclude 'charts/bale-flux/templates/**' .
+    nix run --no-update-lock-file path:.#scan
 
 vuln:
-    nix develop path:. -c govulncheck ./...
-    nix develop path:. -c sh -c 'cd plugins/helm && govulncheck ./...'
-    nix develop path:. -c sh -c 'cd plugins/helm-relocate && govulncheck ./...'
+    nix run --no-update-lock-file path:.#dev-vuln
 
 docs-build:
     nix build --no-update-lock-file path:.#docs --out-link result-docs

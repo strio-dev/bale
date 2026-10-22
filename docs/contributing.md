@@ -25,11 +25,12 @@ Use focused checks while editing, then run `just fmt` and `just check` before su
 | `just test` | Tests in all three Go modules. |
 | `just vet` / `just lint` | Go static analysis in all modules. |
 | `just fmt` | Format Go, Nix and the Justfile in place. |
-| `just check` | Full flake checks, including documentation and plugin builds. |
+| `just check` | Full flake checks, including docs, plugins and acceptance suites. |
 | `just scan` / `just vuln` | Semgrep and Go vulnerability checks. |
 | `just registry-acceptance` | Packaged CLI and consumers against native registries. |
+| `just container-acceptance` | Packaged CLI container through offline transfer and TLS tests. |
 
-Add regression coverage for behavior changes. See [test suites](development/testing.md) for plugin checks and optional live Kubernetes tests.
+Build and check commands use the pinned Nix tools. Container acceptance requires Linux AMD64 and writable `/dev/kvm`; other focused checks run without a VM. Add regression coverage for behavior changes. See [test suites](development/testing.md) for details and optional live Kubernetes tests.
 
 Nix commands using `path:.` include untracked files. `just release-check` checks the Git source, including working-tree edits to tracked files. Stage new files before that check.
 
@@ -46,6 +47,6 @@ The pinned [Strio theme](https://github.com/strio-dev/strio-zensical-theme) supp
 
 ## CI and releases
 
-GitHub Actions runs quality, documentation, registry acceptance and native Linux AMD64/ARM64 checks. Semgrep and CodeQL publish security findings. Documentation deploys from `main` after its checks pass.
+GitHub Actions invokes the same Nix checks for quality, documentation, registry and container acceptance, and native Linux AMD64/ARM64 builds. Semgrep and CodeQL use Nix commands and publish security findings. Documentation deploys from `main` after its checks pass.
 
 Build local CLI archives with `just release-build` or an OCI layout with `just container-build`. After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1`. CI publishes static Linux AMD64/ARM64 archives, `SHA256SUMS` and a multiarchitecture `ghcr.io/strio-dev/bale` image. Stable releases update the image's `latest` tag; build metadata replaces `+` with `_` in image tags. Assets are assembled in a draft first; reruns preserve published versions. Helm and Flux artifacts use their [separate packaging commands](development/testing.md#plugin-and-consumer-builds).

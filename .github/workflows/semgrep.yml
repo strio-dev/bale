@@ -37,15 +37,7 @@ jobs:
           version: v3.1.0
           upstream-cache-filter: true
       - name: Scan
-        run: |
-          nix develop --no-update-lock-file path:.#security --command semgrep scan \
-            --no-error --strict --jobs 2 --exclude 'charts/bale-flux/templates/**' \
-            --sarif-output .cache/semgrep.raw.sarif .
-          # GitHub does not consume SARIF suppressions; honor Semgrep's inline annotations.
-          nix develop --no-update-lock-file path:.#security --command jq \
-            '.runs[].results |= map(select(
-              any(.suppressions[]?; .kind == "inSource" and (.status // "accepted") == "accepted") | not
-            ))' .cache/semgrep.raw.sarif > .cache/semgrep.sarif
+        run: nix run --no-update-lock-file path:.#scan -- --no-error
       - name: Publish findings
         if: ${{ !cancelled() && hashFiles('.cache/semgrep.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3

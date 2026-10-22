@@ -12,8 +12,11 @@ let
       "justfile"
       "workflow"
       "helm-plugin-integration"
+      "wasm-contract-fixture"
     ] self.checks.x86_64-linux;
     docs.x86_64-linux = lib.getAttrs [ "docs" "installer" ] self.checks.x86_64-linux;
+    registry.x86_64-linux = lib.getAttrs [ "registry-acceptance" ] self.checks.x86_64-linux;
+    integration.x86_64-linux = lib.getAttrs [ "container-acceptance" ] self.checks.x86_64-linux;
     native = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
       system:
       lib.getAttrs (

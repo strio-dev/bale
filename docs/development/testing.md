@@ -6,6 +6,18 @@ Run focused checks for the code you change, then `just check`. The root library,
 
 `just container-build` produces `result-container/`, an OCI image layout. Native checks validate its digests, architecture, static executable, CA bundle, license files and non-root filesystem permissions. See [local container builds](../guides/container.md#build-locally) to run it with Podman.
 
+## Container acceptance
+
+```sh
+just container-acceptance
+```
+
+This NixOS VM check requires **Linux AMD64 with readable and writable `/dev/kvm`**. It runs the packaged image in rootless Podman, using both its default user and an arbitrary user. No host container runtime is required; Nix supplies the image, registries and tools.
+
+Against both Distribution and Zot, it captures nested bundles, dependencies, multiarchitecture images and portable plugins; restores an archive after stopping its sources; delivers it; and retrieves the delivered graph. The transport cases check registry credentials and private-CA trust. Skipped cases fail the check. VM output retains the test logs.
+
+This check is included in `just check` and default CI on AMD64. ARM64 CI builds and validates the image without running this VM.
+
 ## Plugin and consumer builds
 
 | Command | Checks or output |
@@ -25,7 +37,7 @@ Both discovery checks are required for producer changes and included in `just ch
 just registry-acceptance
 ```
 
-The packaged CLI runs against native Distribution 3.1.2 and Zot 2.1.22 processes using temporary storage and loopback ports. No container runtime is required. This suite runs separately from `just check` and is included in CI.
+The packaged CLI runs against native Distribution 3.1.2 and Zot 2.1.22 processes using temporary storage and loopback ports. No container runtime is required. This Nix check is included in `just check` and CI.
 
 It covers capture, refresh, archive restoration, delivery and locked retrieval with source registries stopped. Cases include nested bundles, multiarchitecture images, declarations, portable discovery plugins and native Helm installation from delivered OCI packages. Publication failure/retry and tag conflicts check partial reports and completion ordering.
 

@@ -1,0 +1,66 @@
+# Requires Flux Operator with ExternalService and ResourceSet steps support.
+# Substitute the resolver URL and namespace. No service or operator is installed here.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  name: bale-web
+  namespace: apps
+  annotations:
+    fluxcd.controlplane.io/reconcileEvery: 5m
+spec:
+  type: ExternalService
+  url: https://bale-resolver.example.com/inputs/web
+  secretRef:
+    name: bale-resolver-auth
+  certSecretRef:
+    name: bale-resolver-ca
+---
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSet
+metadata:
+  name: bale-web
+  namespace: apps
+spec:
+  inputsFrom:
+    - name: bale-web
+  wait: true
+  steps:
+    - name: chart
+      resourcesTemplate: |
+        apiVersion: source.toolkit.fluxcd.io/v1
+        kind: OCIRepository
+        metadata:
+          name: << inputs.sourceName | quote >>
+          namespace: apps
+        spec:
+          interval: 5m
+          url: << inputs.chartRepository | quote >>
+          ref:
+            digest: << inputs.chartDigest | quote >>
+          layerSelector:
+            mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+            operation: copy
+          secretRef:
+            name: destination-registry-auth
+          certSecretRef:
+            name: destination-registry-ca
+    - name: release
+      resourcesTemplate: |
+        apiVersion: helm.toolkit.fluxcd.io/v2
+        kind: HelmRelease
+        metadata:
+          name: << inputs.id | quote >>
+          namespace: apps
+        spec:
+          interval: 5m
+          releaseName: << inputs.id | quote >>
+          chartRef:
+            kind: OCIRepository
+            name: << inputs.sourceName | quote >>
+          postRenderers: << inputs.postRenderers | mustToJson >>
+          # Ordinary chart values stay here; the resolver never renders the chart.
+          values:
+            replicaCount: 1
+            # Adapt this field to the chart, including any hook/subchart settings.
+            imagePullSecrets:
+              - name: destination-registry-auth

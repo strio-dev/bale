@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "context": "language-neutral – 日本語",
+  "artifactPath": "配置/依赖.json",
+  "dependencies": [
+    {
+      "ref": "registry.example.test/artifacts/z:stable"
+    },
+    {
+      "ref": "registry.example.test/artifacts/app@sha256:abababababababababababababababababababababababababababababababab"
+    },
+    {
+      "ref": "registry.example.test/artifacts/z:stable"
+    }
+  ]
+}

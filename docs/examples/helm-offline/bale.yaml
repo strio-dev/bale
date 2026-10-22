@@ -1,0 +1,14 @@
+include:
+  - ref: registry.example.com/charts/web:1.4
+    plugin:
+      ref: registry.example.com/plugins/helm:1
+      input:
+        schemaVersion: 1
+        release: web
+        namespace: apps
+        context: production
+      blobs:
+        chart:
+          mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+  - ref: registry.example.com/plugins/bale:0.0.0-linux-amd64
+  - ref: registry.example.com/images/custom-web:2

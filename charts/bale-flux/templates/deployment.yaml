@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bale-flux.fullname" . }}
+  labels:
+    {{- include "bale-flux.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "bale-flux.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bale-flux.selectorLabels" . | nindent 8 }}
+      {{- if not .Values.existingConfigMap }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bale-flux
+          image: {{ include "bale-flux.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config=/etc/bale/releases.yaml
+            - --listen=0.0.0.0:8080
+            {{- if .Values.bearerToken.existingSecret }}
+            - --bearer-token-file=/etc/bale-token/token
+            {{- end }}
+            {{- if .Values.registry.existingSecret }}
+            - --registry-config=/etc/bale-registry/config.json
+            {{- end }}
+            {{- if .Values.registry.ca.existingSecret }}
+            - --ca-file=/etc/bale-registry-ca/ca.crt
+            {{- end }}
+            {{- if .Values.registry.clientTLS.existingSecret }}
+            - --cert-file=/etc/bale-registry-client/tls.crt
+            - --key-file=/etc/bale-registry-client/tls.key
+            {{- end }}
+            {{- range .Values.registry.plainHTTP }}
+            - {{ printf "--plain-http=%s" . | quote }}
+            {{- end }}
+            {{- if .Values.serverTLS.existingSecret }}
+            - --tls-cert-file=/etc/bale-server-tls/tls.crt
+            - --tls-key-file=/etc/bale-server-tls/tls.key
+            {{- end }}
+          env:
+            - name: HOME
+              value: /home/bale
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # Health checks query only the serving process, never its registries.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: {{ ternary "HTTPS" "HTTP" (ne .Values.serverTLS.existingSecret "") }}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              scheme: {{ ternary "HTTPS" "HTTP" (ne .Values.serverTLS.existingSecret "") }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/bale
+              readOnly: true
+            - name: home
+              mountPath: /home/bale
+            {{- range $name, $config := dict "token" .Values.bearerToken "registry" .Values.registry "registry-ca" .Values.registry.ca "registry-client" .Values.registry.clientTLS "server-tls" .Values.serverTLS }}
+            {{- if $config.existingSecret }}
+            - name: {{ $name }}
+              mountPath: /etc/bale-{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.existingConfigMap | default (include "bale-flux.fullname" .) }}
+            items:
+              - key: releases.yaml
+                path: releases.yaml
+        - name: home
+          emptyDir:
+            sizeLimit: 16Mi
+        {{- range $name, $config := dict "token" .Values.bearerToken "registry" .Values.registry "registry-ca" .Values.registry.ca "registry-client" .Values.registry.clientTLS "server-tls" .Values.serverTLS }}
+        {{- if $config.existingSecret }}
+        - name: {{ $name }}
+          secret:
+            secretName: {{ $config.existingSecret | quote }}
+            defaultMode: 0440
+            items:
+              {{- if eq $name "token" }}
+              - key: {{ $config.key | quote }}
+                path: token
+              {{- else if eq $name "registry" }}
+              - key: {{ $config.configKey | quote }}
+                path: config.json
+              {{- else if eq $name "registry-ca" }}
+              - key: {{ $config.key | quote }}
+                path: ca.crt
+              {{- else }}
+              - key: {{ $config.certKey | quote }}
+                path: tls.crt
+              - key: {{ $config.keyKey | quote }}
+                path: tls.key
+              {{- end }}
+        {{- end }}
+        {{- end }}

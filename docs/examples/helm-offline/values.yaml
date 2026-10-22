@@ -1,0 +1,4 @@
+# Deployment only: write this after choosing the destination and delivery path.
+# This example assumes the chart accepts a full image reference at `image`.
+# Adapt the field to your chart's values schema.
+image: mirror.example.com/release/images/custom-web:2

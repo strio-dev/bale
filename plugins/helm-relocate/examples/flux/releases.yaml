@@ -1,0 +1,7 @@
+# Server-side allowlist: requests can select only these logical release names.
+releases:
+  - name: web
+    chart: mirror.example.com/charts/web:1.0.0
+    # Add bundle/source/capture/declaration/context only when selection is ambiguous.
+    # selection:
+    #   context: production

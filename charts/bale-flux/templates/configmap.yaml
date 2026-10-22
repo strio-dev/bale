@@ -1,0 +1,14 @@
+{{- if not .Values.existingConfigMap }}
+{{- if not .Values.releases }}
+{{- fail "set at least one releases entry or existingConfigMap (with a releases.yaml key)" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bale-flux.fullname" . }}
+  labels:
+    {{- include "bale-flux.labels" . | nindent 4 }}
+data:
+  releases.yaml: |
+    {{- dict "releases" .Values.releases | toYaml | nindent 4 }}
+{{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bale-flux
+description: Bale destination attachment inputs for Flux Operator
+version: 0.0.0-dev
+appVersion: "dev"
+type: application

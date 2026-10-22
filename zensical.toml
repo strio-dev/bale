@@ -1,0 +1,31 @@
+[project]
+site_name = "Bale"
+site_description = "Bundle OCI images and artifacts for registry and offline transfer."
+nav = [
+  { "Overview" = "index.md" },
+  { "Getting started" = "getting-started.md" },
+  { "Guides" = [
+    { "Helm" = "helm.md" },
+    { "Flux" = "flux.md" },
+    { "Transfers" = "transfers.md" },
+    { "Offline packaging" = "offline.md" },
+    { "Delivery updates" = "delivery-updates.md" },
+    { "Inspection" = "inspection.md" },
+    { "Registry behavior" = "registry.md" },
+  ] },
+  { "Reference" = [
+    { "Recipes" = "recipes.md" },
+    { "Dependency declarations" = "dependencies.md" },
+    { "Dependency plugins" = "plugins.md" },
+    { "Destination records" = "destinations.md" },
+    { "Go SDK" = "sdk.md" },
+  ] },
+  { "Contributing" = "contributing.md" },
+]
+
+[project.extra]
+strio_accent = "#258374"
+
+[project.theme]
+logo = "assets/bale-wordmark.svg"
+favicon = "assets/bale-favicon.svg"

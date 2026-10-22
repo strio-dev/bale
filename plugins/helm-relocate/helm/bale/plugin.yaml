@@ -1,0 +1,10 @@
+apiVersion: v1
+type: cli/v1
+name: bale
+version: 0.0.0
+runtime: subprocess
+runtimeConfig:
+  platformCommand:
+    - os: "@os@"
+      arch: "@arch@"
+      command: '${HELM_PLUGIN_DIR}/bale-helm'

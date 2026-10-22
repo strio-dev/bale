@@ -1,0 +1,48 @@
+image:
+  repository: ghcr.io/strio-dev/bale-flux
+  # Defaults to Chart.appVersion. A digest takes precedence over the tag.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Configure at least one allowed release, or supply an existing ConfigMap with
+# a releases.yaml key. The service never accepts arbitrary registry references.
+releases: []
+# - name: web
+#   chart: mirror.example.com/charts/web:1.0.0
+#   selection:
+#     context: production
+existingConfigMap: ""
+
+service:
+  port: 8080
+
+# Each referenced Secret must already exist in the release namespace.
+bearerToken:
+  existingSecret: ""
+  key: token
+registry:
+  # Docker/Helm JSON with auth entries; the supplied image has no credential helpers.
+  existingSecret: ""
+  configKey: config.json
+  ca:
+    existingSecret: ""
+    key: ca.crt
+  clientTLS:
+    existingSecret: ""
+    certKey: tls.crt
+    keyKey: tls.key
+  # Registry hosts (host:port allowed), never URLs. Use only for HTTP registries.
+  plainHTTP: []
+serverTLS:
+  existingSecret: ""
+  certKey: tls.crt
+  keyKey: tls.key
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 256Mi

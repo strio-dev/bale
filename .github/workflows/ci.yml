@@ -1,0 +1,288 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Native globs select unprefixed version-shaped tags, not strict SemVer.
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+      - '[0-9]+.[0-9]+.[0-9]+\+*'
+      # Release tags do not use underscores.
+      - '!**_*'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      kubernetes:
+        description: Run the live Kubernetes acceptance suite (requires KVM)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  matrix:
+    name: Generate check matrices
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      quality: ${{ steps.matrix.outputs.quality }}
+      docs: ${{ steps.matrix.outputs.docs }}
+      native: ${{ steps.matrix.outputs.native }}
+      published: ${{ steps.release.outputs.published }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - &checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - &nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - &nix-cache
+        name: Cache Nix builds
+        uses: Mic92/hestia@dfed9ced335d28978ba74e513939a10db1f71025 # v3.1.0
+        continue-on-error: true
+        with:
+          version: v3.1.0
+          upstream-cache-filter: true
+      - id: matrix
+        run: |
+          matrices=$(nix eval --json --no-update-lock-file path:.#githubActions.matrices)
+          for category in quality docs native; do
+            printf '%s=%s\n' "$category" "$(jq -c --arg category "$category" '.[$category]' <<< "$matrices")" >> "$GITHUB_OUTPUT"
+          done
+      - name: Read release metadata
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        id: release
+        uses: &github-script actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const tag = process.env.GITHUB_REF_NAME;
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('published', Boolean(release && !release.draft));
+            core.setOutput('prerelease', tag.split('+', 1)[0].includes('-'));
+
+  quality:
+    name: Quality checks
+    needs: matrix
+    runs-on: ${{ fromJSON(needs.matrix.outputs.quality).include[0].os }}
+    timeout-minutes: 45
+    env:
+      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.quality).include[0].attrs) }}
+    steps:
+      - *checkout
+      - *nix
+      - *nix-cache
+      - &check
+        name: Run checks
+        run: |
+          mapfile -t attrs < <(jq -r '.[] | "path:.#" + .' <<< "$NIX_ATTRS")
+          nix build --no-link --no-update-lock-file --print-build-logs "${attrs[@]}"
+
+  documentation:
+    name: Documentation checks
+    needs: matrix
+    runs-on: ${{ fromJSON(needs.matrix.outputs.docs).include[0].os }}
+    timeout-minutes: 30
+    env:
+      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.docs).include[0].attrs) }}
+    steps:
+      - *checkout
+      - *nix
+      - *nix-cache
+      - *check
+      - name: Locate documentation
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        id: site
+        run: |
+          site=$(nix path-info --no-update-lock-file path:.#checks.x86_64-linux.docs)
+          printf 'path=%s\n' "$site" >> "$GITHUB_OUTPUT"
+      - name: Upload documentation
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ steps.site.outputs.path }}
+
+  native:
+    name: Native checks
+    needs: matrix
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.native) }}
+    env:
+      NIX_ATTRS: ${{ toJSON(matrix.attrs) }}
+    steps:
+      - *checkout
+      - &release-version
+        name: Set release version
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: printf '%s\n' "$GITHUB_REF_NAME" > nix/release-version
+      - *nix
+      - *nix-cache
+      - *check
+      - name: Locate release archive
+        if: github.event_name == 'push' && github.ref_type == 'tag' && needs.matrix.outputs.published != 'true'
+        run: nix build --out-link result-release --no-update-lock-file path:.#release-binary
+      - name: Upload release artifacts
+        if: github.event_name == 'push' && github.ref_type == 'tag' && needs.matrix.outputs.published != 'true'
+        uses: &upload-artifact actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.system }}
+          path: result-release/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  vulnerabilities:
+    name: Go vulnerability checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *nix
+      - *nix-cache
+      - name: Check all Go modules
+        run: |
+          nix develop --no-update-lock-file path:. --command bash -e <<'SCRIPT'
+            for module in . plugins/helm plugins/helm-relocate; do
+              (cd "$module" && govulncheck ./...)
+            done
+          SCRIPT
+
+  registry:
+    name: Registry acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - *checkout
+      - *release-version
+      - *nix
+      - *nix-cache
+      - name: Test Distribution and Zot
+        run: nix run --no-update-lock-file path:.#registry-acceptance
+
+  kubernetes:
+    name: Kubernetes acceptance
+    if: github.event_name == 'workflow_dispatch' && inputs.kubernetes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - *checkout
+      - *nix
+      - *nix-cache
+      - name: Require KVM
+        run: |
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo 'Kubernetes acceptance requires readable and writable /dev/kvm.' >&2
+            exit 1
+          fi
+      - name: Test Helm and Flux offline
+        run: nix run --no-update-lock-file path:.#kubernetes-acceptance -- --output "$RUNNER_TEMP/kubernetes-evidence"
+      - name: Upload Kubernetes evidence
+        if: always()
+        uses: *upload-artifact
+        with:
+          name: kubernetes-evidence
+          path: ${{ runner.temp }}/kubernetes-evidence/
+          if-no-files-found: warn
+          retention-days: 7
+
+  docs:
+    name: docs
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [quality, documentation, native, registry, vulnerabilities]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: docs
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: docs
+      cancel-in-progress: false
+    steps:
+      - name: Deploy documentation
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  release:
+    name: Publish binaries
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [matrix, quality, documentation, native, registry, vulnerabilities]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: release
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - *checkout
+      - *release-version
+      - *nix
+      - *nix-cache
+      - name: Read current release state
+        id: state
+        uses: *github-script
+        with:
+          script: |
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag: process.env.GITHUB_REF_NAME }));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('exists', Boolean(release));
+            core.setOutput('published', Boolean(release && !release.draft));
+      - name: Download release artifacts
+        if: steps.state.outputs.published != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist/
+      - name: Collect checksums
+        if: steps.state.outputs.published != 'true'
+        run: |
+          test -f dist/bale-linux-amd64.tar.gz
+          test -f dist/bale-linux-arm64.tar.gz
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+      - name: Upload release assets
+        if: steps.state.outputs.published != 'true'
+        uses: &github-release softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          draft: true
+          prerelease: ${{ needs.matrix.outputs.prerelease }}
+          make_latest: 'false'
+          generate_release_notes: ${{ steps.state.outputs.exists != 'true' }}
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/bale-linux-amd64.tar.gz
+            dist/bale-linux-arm64.tar.gz
+            dist/SHA256SUMS
+      - name: Publish release
+        if: steps.state.outputs.published != 'true'
+        uses: *github-release
+        with:
+          draft: false
+          prerelease: ${{ needs.matrix.outputs.prerelease }}
+          make_latest: ${{ needs.matrix.outputs.prerelease != 'true' }}

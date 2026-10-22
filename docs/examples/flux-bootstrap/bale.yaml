@@ -1,0 +1,3 @@
+include:
+  - ref: registry.example.com/charts/bale-flux:0.0.0-dev
+  - ref: registry.example.com/images/bale-flux:dev

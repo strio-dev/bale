@@ -1,0 +1,9 @@
+.direnv/
+.cache/
+site/
+result
+result-*
+/bin/
+/coverage.out
+/dist/
+/nix/release-version

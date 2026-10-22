@@ -1,0 +1,19 @@
+# Deployment only: set this to the image's transferred location after push.
+image:
+  repository: mirror.example.com/release/images/bale-flux
+  tag: dev
+imagePullSecrets:
+  - name: destination-registry-auth
+existingConfigMap: bale-flux-releases
+
+# Existing Secrets in flux-system. Create these at the destination; never put
+# registry passwords, HTTP tokens or private keys in the bundle recipe.
+bearerToken:
+  existingSecret: bale-resolver-auth
+serverTLS:
+  existingSecret: bale-resolver-tls
+registry:
+  existingSecret: destination-registry-auth
+  configKey: .dockerconfigjson
+  ca:
+    existingSecret: destination-registry-ca

@@ -1,0 +1,382 @@
+--- a/internal/version/clientgo.go
++++ b/internal/version/clientgo.go
+@@ -1,3 +1,5 @@
++// Modified for Bale offline rendering.
++
+ /*
+ Copyright The Helm Authors.
+ 
+@@ -21,7 +23,7 @@
+ 	"runtime/debug"
+ 	"slices"
+ 
+-	_ "k8s.io/client-go/kubernetes" // Force k8s.io/client-go to be included in the build
++	_ "k8s.io/client-go/pkg/version" // Force k8s.io/client-go to be included in the build
+ )
+ 
+ func K8sIOClientGoModVersion() (string, error) {
+--- a/pkg/chart/common/capabilities.go
++++ b/pkg/chart/common/capabilities.go
+@@ -1,3 +1,5 @@
++// Modified for Bale offline rendering.
++
+ /*
+ Copyright The Helm Authors.
+ Licensed under the Apache License, Version 2.0 (the "License");
+@@ -23,10 +25,7 @@
+ 	"testing"
+ 
+ 	"github.com/Masterminds/semver/v3"
+-	"k8s.io/client-go/kubernetes/scheme"
+ 
+-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+-	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+ 	k8sversion "k8s.io/apimachinery/pkg/util/version"
+ 
+ 	helmversion "helm.sh/helm/v4/internal/version"
+@@ -126,21 +125,6 @@
+ 	return slices.Contains(v, apiVersion)
+ }
+ 
+-func allKnownVersions() VersionSet {
+-	// We should register the built in extension APIs as well so CRDs are
+-	// supported in the default version set. This has caused problems with `helm
+-	// template` in the past, so let's be safe
+-	apiextensionsv1beta1.AddToScheme(scheme.Scheme)
+-	apiextensionsv1.AddToScheme(scheme.Scheme)
+-
+-	groups := scheme.Scheme.PrioritizedVersionsAllGroups()
+-	vs := make(VersionSet, 0, len(groups))
+-	for _, gv := range groups {
+-		vs = append(vs, gv.String())
+-	}
+-	return vs
+-}
+-
+ func makeDefaultCapabilities() (*Capabilities, error) {
+ 	// Test builds don't include debug info / module info
+ 	// (And even if they did, we probably want stable capabilities for tests anyway)
+--- a/pkg/engine/engine.go
++++ b/pkg/engine/engine.go
+@@ -1,3 +1,5 @@
++// Modified for Bale offline rendering.
++
+ /*
+ Copyright The Helm Authors.
+ 
+@@ -29,8 +31,6 @@
+ 	"strings"
+ 	"text/template"
+ 
+-	"k8s.io/client-go/rest"
+-
+ 	ci "helm.sh/helm/v4/pkg/chart"
+ 	"helm.sh/helm/v4/pkg/chart/common"
+ )
+@@ -43,21 +43,13 @@
+ 	// In LintMode, some 'required' template values may be missing, so don't fail
+ 	LintMode bool
+ 	// optional provider of clients to talk to the Kubernetes API
+-	clientProvider *ClientProvider
++	clientProvider *engineClientProvider
+ 	// EnableDNS tells the engine to allow DNS lookups when rendering templates
+ 	EnableDNS bool
+ 	// CustomTemplateFuncs is defined by users to provide custom template funcs
+ 	CustomTemplateFuncs template.FuncMap
+ }
+ 
+-// New creates a new instance of Engine using the passed in rest config.
+-func New(config *rest.Config) Engine {
+-	var clientProvider ClientProvider = clientProviderFromConfig{config}
+-	return Engine{
+-		clientProvider: &clientProvider,
+-	}
+-}
+-
+ // Render takes a chart, optional values, and value overrides, and attempts to render the Go templates.
+ //
+ // Render can be called repeatedly on the same engine.
+@@ -113,26 +105,6 @@
+ 	return new(Engine).Render(chrt, values)
+ }
+ 
+-// RenderWithClient takes a chart, optional values, and value overrides, and attempts to
+-// render the Go templates using the default options. This engine is client aware and so can have template
+-// functions that interact with the client.
+-func RenderWithClient(chrt ci.Charter, values common.Values, config *rest.Config) (map[string]string, error) {
+-	var clientProvider ClientProvider = clientProviderFromConfig{config}
+-	return Engine{
+-		clientProvider: &clientProvider,
+-	}.Render(chrt, values)
+-}
+-
+-// RenderWithClientProvider takes a chart, optional values, and value overrides, and attempts to
+-// render the Go templates using the default options. This engine is client aware and so can have template
+-// functions that interact with the client.
+-// This function differs from RenderWithClient in that it lets you customize the way a dynamic client is constructed.
+-func RenderWithClientProvider(chrt ci.Charter, values common.Values, clientProvider ClientProvider) (map[string]string, error) {
+-	return Engine{
+-		clientProvider: &clientProvider,
+-	}.Render(chrt, values)
+-}
+-
+ // renderable is an object that can be rendered.
+ type renderable struct {
+ 	// tpl is the current template.
+@@ -263,11 +235,7 @@
+ 		return "", errors.New(warnWrap(msg))
+ 	}
+ 
+-	// If we are not linting and have a cluster connection, provide a Kubernetes-backed
+-	// implementation.
+-	if !e.LintMode && e.clientProvider != nil {
+-		funcMap["lookup"] = newLookupFunction(ctx, *e.clientProvider)
+-	}
++	e.addClientFuncs(ctx, funcMap)
+ 
+ 	// When DNS lookups are not enabled override the sprig function and return
+ 	// an empty string.
+--- a/pkg/engine/lookup_func.go
++++ b/pkg/engine/lookup_func.go
+@@ -1,3 +1,7 @@
++//go:build !helm_offline
++
++// Modified for Bale offline rendering.
++
+ /*
+ Copyright The Helm Authors.
+ 
+--- /dev/null
++++ b/pkg/chart/common/capabilities_offline.go
+@@ -0,0 +1,84 @@
++//go:build helm_offline
++
++// Modified for Bale offline rendering.
++
++/*
++Copyright The Helm Authors.
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package common
++
++// Generated from unmodified Helm v4.3.0 with k8s.io/client-go v0.37.0.
++// Exact captured stock ordering; preserves priorities within each API group.
++func allKnownVersions() VersionSet {
++	return VersionSet{
++		"v1",
++		"admissionregistration.k8s.io/v1",
++		"admissionregistration.k8s.io/v1alpha1",
++		"admissionregistration.k8s.io/v1beta1",
++		"internal.apiserver.k8s.io/v1alpha1",
++		"apps/v1",
++		"apps/v1beta1",
++		"apps/v1beta2",
++		"authentication.k8s.io/v1",
++		"authentication.k8s.io/v1alpha1",
++		"authentication.k8s.io/v1beta1",
++		"authorization.k8s.io/v1",
++		"authorization.k8s.io/v1beta1",
++		"autoscaling/v1",
++		"autoscaling/v2",
++		"batch/v1",
++		"batch/v1beta1",
++		"certificates.k8s.io/v1",
++		"certificates.k8s.io/v1beta1",
++		"certificates.k8s.io/v1alpha1",
++		"coordination.k8s.io/v1alpha2",
++		"coordination.k8s.io/v1beta1",
++		"coordination.k8s.io/v1",
++		"discovery.k8s.io/v1",
++		"discovery.k8s.io/v1beta1",
++		"events.k8s.io/v1",
++		"events.k8s.io/v1beta1",
++		"extensions/v1beta1",
++		"flowcontrol.apiserver.k8s.io/v1",
++		"flowcontrol.apiserver.k8s.io/v1beta1",
++		"flowcontrol.apiserver.k8s.io/v1beta2",
++		"flowcontrol.apiserver.k8s.io/v1beta3",
++		"lifecycle.k8s.io/v1alpha1",
++		"networking.k8s.io/v1",
++		"networking.k8s.io/v1beta1",
++		"node.k8s.io/v1",
++		"node.k8s.io/v1alpha1",
++		"node.k8s.io/v1beta1",
++		"policy/v1",
++		"policy/v1beta1",
++		"rbac.authorization.k8s.io/v1",
++		"rbac.authorization.k8s.io/v1beta1",
++		"rbac.authorization.k8s.io/v1alpha1",
++		"resource.k8s.io/v1",
++		"resource.k8s.io/v1beta2",
++		"resource.k8s.io/v1beta1",
++		"resource.k8s.io/v1alpha3",
++		"scheduling.k8s.io/v1alpha3",
++		"scheduling.k8s.io/v1beta1",
++		"scheduling.k8s.io/v1",
++		"storage.k8s.io/v1beta1",
++		"storage.k8s.io/v1",
++		"storage.k8s.io/v1alpha1",
++		"storagemigration.k8s.io/v1",
++		"storagemigration.k8s.io/v1beta1",
++		"apiextensions.k8s.io/v1beta1",
++		"apiextensions.k8s.io/v1",
++	}
++}
+--- /dev/null
++++ b/pkg/chart/common/capabilities_online.go
+@@ -0,0 +1,41 @@
++//go:build !helm_offline
++
++// Modified for Bale offline rendering.
++
++/*
++Copyright The Helm Authors.
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package common
++
++import (
++	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
++	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
++	"k8s.io/client-go/kubernetes/scheme"
++)
++
++func allKnownVersions() VersionSet {
++	// We should register the built in extension APIs as well so CRDs are
++	// supported in the default version set. This has caused problems with `helm
++	// template` in the past, so let's be safe
++	apiextensionsv1beta1.AddToScheme(scheme.Scheme)
++	apiextensionsv1.AddToScheme(scheme.Scheme)
++
++	groups := scheme.Scheme.PrioritizedVersionsAllGroups()
++	vs := make(VersionSet, 0, len(groups))
++	for _, gv := range groups {
++		vs = append(vs, gv.String())
++	}
++	return vs
++}
+--- /dev/null
++++ b/pkg/engine/engine_offline.go
+@@ -0,0 +1,30 @@
++//go:build helm_offline
++
++// Modified for Bale offline rendering.
++
++/*
++Copyright The Helm Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package engine
++
++import (
++	"context"
++	"text/template"
++)
++
++type engineClientProvider struct{}
++
++func (e Engine) addClientFuncs(_ context.Context, _ template.FuncMap) {}
+--- /dev/null
++++ b/pkg/engine/engine_online.go
+@@ -0,0 +1,67 @@
++//go:build !helm_offline
++
++// Modified for Bale offline rendering.
++
++/*
++Copyright The Helm Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package engine
++
++import (
++	"context"
++	ci "helm.sh/helm/v4/pkg/chart"
++	"helm.sh/helm/v4/pkg/chart/common"
++	"k8s.io/client-go/rest"
++	"text/template"
++)
++
++type engineClientProvider = ClientProvider
++
++// New creates a new instance of Engine using the passed in rest config.
++func New(config *rest.Config) Engine {
++	var clientProvider ClientProvider = clientProviderFromConfig{config}
++	return Engine{
++		clientProvider: &clientProvider,
++	}
++}
++
++// RenderWithClient takes a chart, optional values, and value overrides, and attempts to
++// render the Go templates using the default options. This engine is client aware and so can have template
++// functions that interact with the client.
++func RenderWithClient(chrt ci.Charter, values common.Values, config *rest.Config) (map[string]string, error) {
++	var clientProvider ClientProvider = clientProviderFromConfig{config}
++	return Engine{
++		clientProvider: &clientProvider,
++	}.Render(chrt, values)
++}
++
++// RenderWithClientProvider takes a chart, optional values, and value overrides, and attempts to
++// render the Go templates using the default options. This engine is client aware and so can have template
++// functions that interact with the client.
++// This function differs from RenderWithClient in that it lets you customize the way a dynamic client is constructed.
++func RenderWithClientProvider(chrt ci.Charter, values common.Values, clientProvider ClientProvider) (map[string]string, error) {
++	return Engine{
++		clientProvider: &clientProvider,
++	}.Render(chrt, values)
++}
++
++func (e Engine) addClientFuncs(ctx context.Context, funcMap template.FuncMap) {
++	// If we are not linting and have a cluster connection, provide a Kubernetes-backed
++	// implementation.
++	if !e.LintMode && e.clientProvider != nil {
++		funcMap["lookup"] = newLookupFunction(ctx, *e.clientProvider)
++	}
++}

@@ -22,12 +22,12 @@ func TestFluxPackagingRegistryAcceptance(t *testing.T) {
 	if os.Getenv("BALE_ACCEPTANCE_FLUX_IMAGE") == "" && os.Getenv("BALE_ACCEPTANCE_FLUX_CHART") == "" {
 		t.Skip("run registry acceptance with the packaged Flux service image and chart")
 	}
-	names := []string{"BALE_ACCEPTANCE_BINARY", "BALE_ACCEPTANCE_DISTRIBUTION", "BALE_ACCEPTANCE_ZOT", "BALE_ACCEPTANCE_HELM_PLUGIN", "BALE_ACCEPTANCE_HELM", "BALE_ACCEPTANCE_HELM_CONSUMER", "BALE_ACCEPTANCE_FLUX_IMAGE", "BALE_ACCEPTANCE_FLUX_CHART"}
+	names := []string{"BALE_ACCEPTANCE_BINARY", "BALE_ACCEPTANCE_DISTRIBUTION", "BALE_ACCEPTANCE_ZOT", "BALE_ACCEPTANCE_HELM_PLUGIN", "BALE_ACCEPTANCE_HELM", "BALE_ACCEPTANCE_HELM_CONSUMER_ARCHIVE", "BALE_ACCEPTANCE_FLUX_IMAGE", "BALE_ACCEPTANCE_FLUX_CHART"}
 	paths := make([]string, len(names))
 	for i, name := range names {
 		paths[i] = os.Getenv(name)
 		info, err := os.Stat(paths[i])
-		directory := i == 5 || i == 6
+		directory := i == 6
 		if err != nil || !filepath.IsAbs(paths[i]) || info.IsDir() != directory || (!directory && !info.Mode().IsRegular()) || ((i < 3 || i == 4) && info.Mode()&0111 == 0) {
 			t.Fatalf("%s must name an absolute packaged %s: %q (%v)", name, map[bool]string{true: "directory", false: "file"}[directory], paths[i], err)
 		}
@@ -62,7 +62,7 @@ func runFluxPackagingCycle(t *testing.T, ctx context.Context, paths []string, ki
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumer := seedHelmConsumerPackage(t, ctx, client, paths[4], paths[5], source.host)
+	consumer := seedHelmConsumerPackage(t, ctx, client, paths[5], source.host)
 	plugin := source.host + "/plugins/helm:v1"
 	command.run("publish discovery plugin", "plugins", "push", "-f", paths[3], plugin)
 	values := map[string]any{

@@ -55,7 +55,7 @@ in
       semgrep scan "$error_mode" --strict --jobs 2 \
         --exclude 'charts/bale-flux/templates/**' \
         --sarif-output .cache/semgrep.raw.sarif \
-        "$@" . nix/tests/installer.py tests/packaging/container_image.py tests/packaging/flux_image.py || status=$?
+        "$@" . nix/tests/installer.py tests/packaging/*.py || status=$?
       # GitHub does not consume SARIF suppressions; honor inline annotations.
       jq ' .runs[].results |= map(select(
         any(.suppressions[]?; .kind == "inSource" and (.status // "accepted") == "accepted") | not

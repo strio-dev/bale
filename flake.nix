@@ -49,6 +49,13 @@
             inherit version;
             go_1_27 = go;
           };
+          helm-consumer-archive = pkgs.callPackage ./nix/helm-consumer-archive.nix {
+            inherit helm-consumer;
+          };
+          helm-plugin-image = pkgs.callPackage ./nix/helm-plugin-image.nix { inherit helm-plugin; };
+          helm-consumer-image = pkgs.callPackage ./nix/helm-consumer-image.nix {
+            inherit helm-consumer-archive;
+          };
           flux-service = pkgs.callPackage ./nix/helm-consumer.nix {
             inherit version;
             go_1_27 = go;
@@ -64,7 +71,7 @@
               bale
               zot
               helm-plugin
-              helm-consumer
+              helm-consumer-archive
               flux-service-image
               flux-service-chart
               ;
@@ -73,7 +80,7 @@
             inherit
               bale
               helm-plugin
-              helm-consumer
+              helm-consumer-archive
               flux-service-image
               flux-service-chart
               ;
@@ -85,6 +92,28 @@
           };
           release = pkgs.callPackage ./nix/release-artifacts.nix { inherit pkgs bale; };
           release-binary = release.binary;
+          distribution = pkgs.callPackage ./nix/distribution.nix {
+            inherit
+              version
+              release-binary
+              container
+              helm-plugin
+              helm-plugin-image
+              helm-consumer-archive
+              helm-consumer-image
+              flux-service-image
+              flux-service-chart
+              ;
+          };
+          publish = pkgs.callPackage ./nix/distribution-publish.nix {
+            inherit
+              container
+              helm-plugin-image
+              helm-consumer-image
+              flux-service-image
+              flux-service-chart
+              ;
+          };
         in
         {
           packages = {
@@ -97,6 +126,10 @@
               release-binary
               helm-plugin
               helm-consumer
+              helm-consumer-archive
+              helm-plugin-image
+              helm-consumer-image
+              distribution
               flux-service
               flux-service-image
               flux-service-chart
@@ -117,6 +150,10 @@
               scan = {
                 type = "app";
                 program = "${security.scan}/bin/bale-scan";
+              };
+              publish = {
+                type = "app";
+                program = "${publish}/bin/bale-publish";
               };
             }
             // pkgs.lib.mapAttrs (name: command: {
@@ -175,6 +212,11 @@
               docs
               helm-plugin
               helm-consumer
+              helm-consumer-archive
+              helm-plugin-image
+              helm-consumer-image
+              distribution
+              publish
               flux-service
               flux-service-image
               flux-service-chart

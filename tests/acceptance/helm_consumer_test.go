@@ -164,13 +164,10 @@ func verifyHelmConsumerUnsupportedPlatform(t *testing.T, helm helmConsumerCLI, a
 
 // Packages are native Helm OCI plugins. Bale transfers their generic manifest
 // graphs unchanged; no Bale-specific plugin packaging or runtime is involved.
-func seedHelmConsumerPackage(t *testing.T, ctx context.Context, client *bale.Client, binary, plugins, host string) bale.Root {
+func seedHelmConsumerPackage(t *testing.T, ctx context.Context, client *bale.Client, archive, host string) bale.Root {
 	t.Helper()
-	helm := newHelmConsumerCLI(t, ctx, binary)
-	dir := t.TempDir()
-	helm.run(nil, "plugin", "package", filepath.Join(plugins, "bale"), "--sign=false", "--destination", dir)
-	const title = "bale-0.0.0.tgz"
-	raw, err := os.ReadFile(filepath.Join(dir, title))
+	title := filepath.Base(archive)
+	raw, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)
 	}

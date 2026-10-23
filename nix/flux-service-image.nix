@@ -10,10 +10,11 @@
   version ? "dev",
 }:
 let
+  imageTag = "nix";
   caNotices = import ./ca-notices.nix { inherit lib runCommand cacert; };
   archive = dockerTools.buildLayeredImage {
     name = "bale-flux";
-    tag = version;
+    tag = imageTag;
     compressor = "none";
     contents = [ ];
     includeStorePaths = false;
@@ -57,7 +58,7 @@ runCommand "bale-flux-image-${version}"
       python3
       binutils
     ];
-    passthru.imageTag = version;
+    passthru = { inherit imageTag; };
     meta = {
       description = "OCI image layout for the Bale Flux adapter";
       license = lib.licenses.mit;
@@ -71,7 +72,7 @@ runCommand "bale-flux-image-${version}"
       exit 1
     fi
     skopeo --insecure-policy copy --format oci \
-      docker-archive:${archive} oci:$out:${version}
+      docker-archive:${archive} oci:$out:${imageTag}
     python3 ${../tests/packaging/flux_image.py} "$out" \
       ${flux-service}/bin/bale-flux ${cacert}/etc/ssl/certs/ca-bundle.crt ${caNotices}
   ''

@@ -23,13 +23,34 @@ This check is included in `just check` and default CI on AMD64. ARM64 CI builds 
 | Command | Checks or output |
 | --- | --- |
 | `just helm-plugin-build` | Portable Helm discovery module. |
+| `just helm-plugin-image-build` | Discovery module packaged as a Wasm OCI layout. |
 | `just helm-plugin-check` | Built module through the offline capture workflow. |
-| `just helm-consumer-build` | Native Helm plugin package, with module tests, vet and lint. |
+| `just helm-consumer-build` | Native Helm plugin directory, with module tests, vet and lint. |
+| `just helm-consumer-package` | Standard Helm plugin archive, checked with Helm's installer. |
+| `just helm-consumer-image-build` | Native archive packaged as a Helm OCI plugin layout. |
 | `just flux-service-build` | Flux adapter, with module tests, vet and lint. |
 | `just flux-image-build` | OCI image layout, including static linkage, CA roots and store-link checks. |
 | `just flux-chart-build` | Linted and packaged adapter chart. |
 
 Both discovery checks are required for producer changes and included in `just check`. See [Helm discovery](../reference/helm-discovery.md) and [consumer packaging](../helm.md#use-delivered-images-in-helm).
+
+## Distribution output
+
+```sh
+just distribution-build
+```
+
+`result-distribution/` collects finished artifacts for the current Linux platform:
+
+- `archives/`: CLI archive, native Helm plugin archive under its platform directory, and Flux chart.
+- `oci/`: CLI, Helm discovery, native Helm plugin and Flux service layouts.
+- `helm-discovery/`: portable module and its license notices.
+
+Nix uses Helm's archive packager and ORAS's OCI layout builder. Native AMD64 and ARM64 CI checks build the distribution output. Packaging checks compare archive contents and OCI descriptors with the original build inputs; the native archive is installed with stock Helm. Registry acceptance transfers and installs the built archive.
+
+The discovery layout carries its license notices as a gzip archive in an OCI referrer. The publishing app copies that referrer with the module; its Wasm profile stays unchanged.
+
+Publish a built artifact with `nix run --no-update-lock-file path:.#publish -- ARTIFACT DESTINATION [publisher options]`. Select `bale`, `helm-discovery`, `helm-consumer`, `bale-flux` or `bale-flux-chart`; see the [Helm](../helm.md#package-and-transfer) and [Flux](../flux.md#build-and-deliver-the-adapter) guides for destinations. Registry credentials remain runtime inputs. Tag-release CI publishes the CLI archives and image; integration artifacts use this separate publishing command.
 
 ## Registry acceptance
 

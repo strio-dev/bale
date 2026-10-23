@@ -2,7 +2,7 @@
 
 Use `bale-flux` to turn a delivered chart's destination attachments into Flux inputs. A Flux Operator ResourceSet creates a digest-pinned OCIRepository and a HelmRelease with image mappings; chart bytes stay unchanged.
 
-This integration requires [Flux Operator](https://fluxoperator.dev/) in addition to Flux. Install those controllers first. The commands below also require Helm 4, Skopeo and kubectl with access to your cluster. The adapter reads registry metadata; Flux renders and deploys the chart.
+This integration requires [Flux Operator](https://fluxoperator.dev/) in addition to Flux. Install those controllers first. Deployment requires Helm 4 and kubectl with access to your cluster; Nix supplies the build and publishing tools. The adapter reads registry metadata; Flux renders and deploys the chart.
 
 ## Build and deliver the adapter
 
@@ -16,13 +16,13 @@ just flux-chart-build
 These builds need no container runtime. The image targets the current Linux platform; the flake supports AMD64 and ARM64. Publish your development artifacts with the pinned release tools:
 
 ```sh
-nix develop --no-update-lock-file path:.#release --command \
-  skopeo copy oci:result-flux-service-image:dev \
-  docker://registry.example.com/images/bale-flux:dev
-nix develop --no-update-lock-file path:.#release --command \
-  helm push result-flux-service-chart/bale-flux-0.0.0-dev.tgz \
-  oci://registry.example.com/charts
+nix run --no-update-lock-file path:.#publish -- \
+  bale-flux registry.example.com/images/bale-flux:dev
+nix run --no-update-lock-file path:.#publish -- \
+  bale-flux-chart oci://registry.example.com/charts
 ```
+
+The image publisher copies the built OCI layout and accepts ORAS copy options. The chart publisher uses Helm, which appends the chart name and version to the destination namespace. Supply credentials and TLS settings at publishing time; use ORAS's `--to-ca-file` for the image and Helm's `--ca-file` for the chart.
 
 Copy the [bootstrap recipe](examples/flux-bootstrap/bale.yaml) to `bale.yaml` and replace its registry names with your published references. The recipe explicitly includes both artifacts; bootstrap needs no discovery plugin.
 

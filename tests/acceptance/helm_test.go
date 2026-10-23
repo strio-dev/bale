@@ -26,7 +26,7 @@ import (
 // CLI and installs the native consumer in stock Helm. SDK calls only publish
 // artifact fixtures and verify immutable bytes.
 func TestHelmPluginRegistryAcceptance(t *testing.T) {
-	names := []string{"BALE_ACCEPTANCE_BINARY", "BALE_ACCEPTANCE_DISTRIBUTION", "BALE_ACCEPTANCE_ZOT", "BALE_ACCEPTANCE_HELM_PLUGIN", "BALE_ACCEPTANCE_HELM", "BALE_ACCEPTANCE_HELM_CONSUMER"}
+	names := []string{"BALE_ACCEPTANCE_BINARY", "BALE_ACCEPTANCE_DISTRIBUTION", "BALE_ACCEPTANCE_ZOT", "BALE_ACCEPTANCE_HELM_PLUGIN", "BALE_ACCEPTANCE_HELM", "BALE_ACCEPTANCE_HELM_CONSUMER_ARCHIVE"}
 	paths := make([]string, len(names))
 	present := 0
 	for i, name := range names {
@@ -39,12 +39,12 @@ func TestHelmPluginRegistryAcceptance(t *testing.T) {
 		t.Skip("run the registry acceptance app to supply Bale, registries and the production Helm guest")
 	}
 	if present != len(names) {
-		t.Fatal("all acceptance executable paths, Helm guest and native Helm consumer plugin directory must be supplied")
+		t.Fatal("all acceptance executable paths, Helm guest and native Helm consumer archive must be supplied")
 	}
 	for i, path := range paths {
 		info, err := os.Stat(path)
-		if err != nil || !filepath.IsAbs(path) || (i == 5 && !info.IsDir()) || (i != 5 && !info.Mode().IsRegular()) || ((i < 3 || i == 4) && info.Mode()&0111 == 0) {
-			t.Fatalf("%s must name an absolute file (executable for CLI, Helm and registries; directory containing native consumer plugins): %q (%v)", names[i], path, err)
+		if err != nil || !filepath.IsAbs(path) || !info.Mode().IsRegular() || ((i < 3 || i == 4) && info.Mode()&0111 == 0) {
+			t.Fatalf("%s must name an absolute file (executable for CLI, Helm and registries): %q (%v)", names[i], path, err)
 		}
 	}
 	for _, backend := range []struct{ name, binary string }{{"distribution", paths[1]}, {"zot", paths[2]}} {
@@ -69,7 +69,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, module, hel
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumerRoot := seedHelmConsumerPackage(t, ctx, client, helm, consumer, source.host)
+	consumerRoot := seedHelmConsumerPackage(t, ctx, client, consumer, source.host)
 	// Distinct multi-platform graphs exercise index traversal and shared layers.
 	main := seed(t, ctx, client, source.host, "helm-app", "main", true)
 	initImage := seed(t, ctx, client, source.host, "helm-init", "init", true)

@@ -12,6 +12,18 @@ helm-plugin-check:
 helm-consumer-build:
     nix build --no-update-lock-file path:.#helm-consumer --out-link result-helm-consumer
 
+helm-consumer-package:
+    nix build --no-update-lock-file path:.#helm-consumer-archive --out-link result-helm-consumer-archive
+
+helm-plugin-image-build:
+    nix build --no-update-lock-file path:.#helm-plugin-image --out-link result-helm-plugin-image
+
+helm-consumer-image-build:
+    nix build --no-update-lock-file path:.#helm-consumer-image --out-link result-helm-consumer-image
+
+distribution-build:
+    nix build --no-update-lock-file path:.#distribution --out-link result-distribution
+
 flux-service-build:
     nix build --no-update-lock-file path:.#flux-service --out-link result-flux-service
 

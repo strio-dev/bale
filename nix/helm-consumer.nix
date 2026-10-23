@@ -11,9 +11,13 @@ assert lib.elem consumer [
   "helm"
   "flux"
 ];
+let
+  pluginVersion = if version == "dev" then "0.0.0" else lib.removePrefix "v" version;
+in
 (buildGoModule.override { go = go_1_27; }) (finalAttrs: {
   pname = if consumer == "helm" then "bale-helm-consumer" else "bale-flux-service";
   inherit version;
+  passthru = { inherit pluginVersion; };
   src = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
@@ -70,6 +74,7 @@ assert lib.elem consumer [
           pluginDir="$out/share/helm/plugins/bale"
           mkdir -p "$pluginDir"
           substitute helm/bale/plugin.yaml "$pluginDir/plugin.yaml" \
+            --replace-fail 'version: 0.0.0' ${lib.escapeShellArg "version: ${pluginVersion}"} \
             --replace-fail '@os@' '${stdenv.hostPlatform.go.GOOS}' \
             --replace-fail '@arch@' '${stdenv.hostPlatform.go.GOARCH}'
           mv "$out/bin/bale-relocate" "$pluginDir/bale-relocate"
@@ -77,6 +82,7 @@ assert lib.elem consumer [
           rendererDir="$pluginDir/postrenderers/bale-postrenderer"
           mkdir -p "$rendererDir"
           substitute helm/bale/postrenderers/bale-postrenderer/plugin.yaml "$rendererDir/plugin.yaml" \
+            --replace-fail 'version: 0.0.0' ${lib.escapeShellArg "version: ${pluginVersion}"} \
             --replace-fail '@os@' '${stdenv.hostPlatform.go.GOOS}' \
             --replace-fail '@arch@' '${stdenv.hostPlatform.go.GOARCH}'
           rmdir "$out/bin"

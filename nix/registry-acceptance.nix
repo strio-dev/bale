@@ -1,7 +1,7 @@
 {
   bale,
   helm-plugin,
-  helm-consumer,
+  helm-consumer-archive,
   flux-service-image,
   flux-service-chart,
   kubernetes-helm,
@@ -35,7 +35,7 @@ writeShellApplication {
     export BALE_ACCEPTANCE_ZOT=${zot}/bin/zot
     export BALE_ACCEPTANCE_HELM_PLUGIN=${helm-plugin}/lib/bale/plugins/helm.wasm
     export BALE_ACCEPTANCE_HELM=${kubernetes-helm}/bin/helm
-    export BALE_ACCEPTANCE_HELM_CONSUMER=${helm-consumer}/share/helm/plugins
+    export BALE_ACCEPTANCE_HELM_CONSUMER_ARCHIVE=${helm-consumer-archive}/${helm-consumer-archive.archiveName}
     export BALE_ACCEPTANCE_FLUX_IMAGE=${flux-service-image}
     export BALE_ACCEPTANCE_FLUX_CHART=${flux-service-chart}/bale-flux-${flux-service-chart.chartVersion}.tgz
     exec ${tests}/bin/registry-acceptance.test -test.v -test.count=1 -test.timeout=5m "$@"

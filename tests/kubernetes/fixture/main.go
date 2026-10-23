@@ -70,7 +70,7 @@ func main() {
 	source := fs.String("source", "", "source registry host:port")
 	dest := fs.String("dest", "", "destination registry host:port")
 	dir := fs.String("dir", "", "state directory (required)")
-	pluginArchive := fs.String("plugin-archive", "", "Helm-packaged bale-0.0.0.tgz archive")
+	pluginArchive := fs.String("plugin-archive", "", "Helm-packaged native plugin archive")
 	serviceChart := fs.String("service-chart", "", "chart archive")
 	selectedVersion := fs.String("version", "", "image version A or B for retag")
 	workload := fs.String("workload", "", "static workload executable")
@@ -90,7 +90,7 @@ func main() {
 		must(err)
 		store := memory.New()
 		layer := content.NewDescriptorFromBytes(v1.MediaTypeImageLayerGzip, raw)
-		layer.Annotations = map[string]string{v1.AnnotationTitle: "bale-0.0.0.tgz"}
+		layer.Annotations = map[string]string{v1.AnnotationTitle: filepath.Base(*pluginArchive)}
 		must(store.Push(ctx, layer, bytes.NewReader(raw)))
 		descriptor, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, "application/vnd.helm.plugin.v1+json", oras.PackManifestOptions{Layers: []v1.Descriptor{layer}})
 		must(err)

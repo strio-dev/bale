@@ -2,16 +2,19 @@
 
 Capture a chart and its default images, deliver them to a registry, then use `helm bale` to deploy with the delivered image references. The chart archive stays unchanged.
 
-Discovery runs during bundle creation in Bale's Wasm sandbox, using Helm's renderer. Creation needs neither an installed Helm command nor a container runtime. Deployment uses a separate native Helm 4 plugin. Packaging that native plugin also requires Helm 4 and ORAS on your `PATH`. For a complete removable-media workflow, follow the [Helm offline example](examples/helm-offline/README.md).
+Discovery runs during bundle creation in Bale's Wasm sandbox, using Helm's renderer. Creation needs neither an installed Helm command nor a container runtime. Deployment uses a separate native Helm 4 plugin. Nix supplies the tools for building and publishing both plugins. For a complete removable-media workflow, follow the [Helm offline example](examples/helm-offline/README.md).
 
 ## Publish and configure discovery
 
-From a Bale checkout with [Nix set up](contributing.md), build the discovery module and publish it to a repository you can write to:
+From a Bale checkout with [Nix set up](contributing.md), build the discovery OCI layout and publish it to a repository you can write to:
 
 ```sh
-nix build --no-update-lock-file path:.#helm-plugin --out-link result-helm-plugin
-bale plugins push -f result-helm-plugin/lib/bale/plugins/helm.wasm registry.example.com/plugins/helm:1
+just helm-plugin-image-build
+nix run --no-update-lock-file path:.#publish -- \
+  helm-discovery registry.example.com/plugins/helm:1
 ```
+
+The layout contains the portable Wasm module in Bale's standard plugin profile. Publishing copies the built artifact; registry credentials and TLS settings are supplied at runtime. Additional plugin publishing arguments use ORAS copy options, such as `--to-registry-config` and `--to-ca-file`.
 
 Replace the example registry references with your own chart and plugin. Select discovery in `bale.yaml`:
 
@@ -36,31 +39,26 @@ This recipe discovers the chart defaults. If deployment values introduce another
 
 ## Use delivered images in Helm
 
-Build the native plugin for the deployment machine. The flake supports Linux AMD64 and ARM64:
+Build the native plugin archive for the deployment machine. The flake supports Linux AMD64 and ARM64:
 
 ```sh
-nix build --no-update-lock-file path:.#helm-consumer --out-link result-helm-consumer
-helm plugin install result-helm-consumer/share/helm/plugins/bale
+just helm-consumer-package
+helm plugin install result-helm-consumer-archive/bale-0.0.0.tgz --verify=false
 ```
 
-One installation includes the `bale` command and its private post-renderer. To carry the installer through the bundle too, package it before capture as below.
+The development archive uses version `0.0.0`; release builds use their release version. One installation includes the `bale` command and its private post-renderer. To carry the installer through the bundle too, publish its OCI package before capture as below.
 
 ### Package and transfer
 
-From the same checkout, package the native build with Helm 4 and publish it using Helm's OCI plugin format:
+From the same checkout, build the finished OCI layout and publish it using Helm's plugin format:
 
 ```sh
-mkdir -p dist
-helm plugin package result-helm-consumer/share/helm/plugins/bale --sign=false --destination dist
-(
-  cd dist
-  oras push registry.example.com/plugins/bale:0.0.0-linux-amd64 \
-    --artifact-type application/vnd.helm.plugin.v1+json \
-    bale-0.0.0.tgz:application/vnd.oci.image.layer.v1.tar+gzip
-)
+just helm-consumer-image-build
+nix run --no-update-lock-file path:.#publish -- \
+  helm-consumer registry.example.com/plugins/bale:0.0.0-linux-amd64
 ```
 
-The tag above identifies an AMD64 development build; use the matching architecture for your deployment machine. Helm does not select native plugins from a multiarchitecture index.
+These builds target the current Linux platform. The tag above identifies an AMD64 development build; use the matching architecture for your deployment machine. Helm does not select native plugins from a multiarchitecture index. Keep the final repository name `bale`, which Helm uses to find its archive layer.
 
 Add the published native package as another entry in the recipe's existing `include` list:
 
@@ -86,7 +84,7 @@ On the receiving machine, install the delivered package into a Helm environment 
 helm plugin install oci://mirror.example.com/release/plugins/bale:0.0.0-linux-amd64 --verify=false
 ```
 
-The development package is unsigned, hence `--verify=false`; use your verification policy for signed packages.
+The Nix-built package is unsigned, hence `--verify=false`; use your verification policy for signed packages.
 
 ### Render or deploy
 

@@ -2,7 +2,7 @@
   pkgs,
   bale,
   helm-plugin,
-  helm-consumer,
+  helm-consumer-archive,
   flux-service-image,
   flux-service-chart,
 }:
@@ -29,21 +29,10 @@ let
         skopeo --tmpdir "$TMPDIR" --insecure-policy copy --preserve-digests \
               oci:${flux-service-image}:${flux-service-image.imageTag} oci-archive:$out
       '';
-  nativePluginArchive =
-    pkgs.runCommand "bale-native-plugin-acceptance"
-      {
-        nativeBuildInputs = [ pkgs.kubernetes-helm ];
-      }
-      ''
-        export HOME="$TMPDIR"
-        mkdir -p "$out"
-        helm plugin package ${helm-consumer}/share/helm/plugins/bale \
-          --sign=false --destination "$out"
-      '';
   guestConfig = {
     bale = "${bale}/bin/bale";
     helmPlugin = "${helm-plugin}/lib/bale/plugins/helm.wasm";
-    nativePluginArchive = "${nativePluginArchive}/bale-0.0.0.tgz";
+    nativePluginArchive = "${helm-consumer-archive}/${helm-consumer-archive.archiveName}";
     fixture = "${fixtures}/bin/fixture";
     workload = "${fixtures}/bin/workload";
     serviceImage = "/etc/bale-acceptance/service-image.oci.tar";

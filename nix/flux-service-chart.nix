@@ -22,6 +22,7 @@ runCommand "bale-flux-chart-${chartVersion}"
     cp -R ${../charts/bale-flux} chart
     chmod -R u+w chart
     cp ${../LICENSE} chart/LICENSE
+    find chart -exec touch -h -d @1 {} +
     helm lint --strict chart --set existingConfigMap=chart-validation
     helm template validation chart --set existingConfigMap=chart-validation > rendered.yaml
     mkdir -p "$out"

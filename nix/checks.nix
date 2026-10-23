@@ -8,6 +8,11 @@
   docs,
   helm-plugin,
   helm-consumer,
+  helm-consumer-archive,
+  helm-plugin-image,
+  helm-consumer-image,
+  distribution,
+  publish,
   flux-service,
   flux-service-image,
   flux-service-chart,
@@ -29,6 +34,7 @@ in
   build = bale;
   inherit container;
   release-binary = release.check;
+  distribution-publish = publish;
   wasm-contract-fixture = pkgs.runCommand "bale-wasm-contract-fixture-check" { } ''
     cmp ${wasm-contract-fixture}/lib/bale/rust-producer.wasm ${../internal/wasm/testdata/rust-producer.wasm}
     touch "$out"
@@ -42,6 +48,10 @@ in
   inherit
     helm-plugin
     helm-consumer
+    helm-consumer-archive
+    helm-plugin-image
+    helm-consumer-image
+    distribution
     flux-service
     flux-service-image
     flux-service-chart

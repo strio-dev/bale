@@ -26,7 +26,12 @@ func TestProcessHelper(t *testing.T) {
 	case "term", "ignore":
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGTERM, os.Interrupt)
-		if err := os.WriteFile(os.Getenv("BALE_TEST_READY"), []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+		ready := os.Getenv("BALE_TEST_READY")
+		if err := os.WriteFile(ready+".tmp", []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+			os.Exit(99)
+		}
+		// Publish readiness only after the complete PID has been written and closed.
+		if err := os.Rename(ready+".tmp", ready); err != nil {
 			os.Exit(99)
 		}
 		for sig := range ch {

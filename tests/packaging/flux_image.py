@@ -8,7 +8,7 @@ import sys
 import tarfile
 
 
-layout, executable, certificates = map(Path, sys.argv[1:])
+layout, executable, certificates, ca_notices = map(Path, sys.argv[1:])
 assert json.loads((layout / "oci-layout").read_text())["imageLayoutVersion"] == "1.0.0"
 
 
@@ -41,6 +41,10 @@ for layer in manifest["layers"]:
                 files[path] = archive.extractfile(entry).read()
 assert files["bin/bale-flux"] == executable.read_bytes()
 assert files["etc/ssl/certs/ca-certificates.crt"] == certificates.read_bytes()
+for name in ("NOTICE", "certdata.txt"):
+    assert files["usr/share/licenses/mozilla-ca/" + name] == (ca_notices / name).read_bytes()
+assert b"Source Code Form" in files["usr/share/licenses/mozilla-ca/certdata.txt"]
+assert b"https://mozilla.org/MPL/2.0/" in files["usr/share/licenses/mozilla-ca/NOTICE"]
 assert b"65532:65532" in files["etc/passwd"]
 assert b"65532" in files["etc/group"]
-print("Flux OCI image verified: static binary, CA roots, non-root user, no store links")
+print("Flux OCI image verified: static binary, CA roots and source notices, non-root user, no store links")

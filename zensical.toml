@@ -12,6 +12,7 @@ nav = [
     { "Offline Helm application" = "examples/helm-offline/README.md" },
   ] },
   { "Guides" = [
+    { "Run in a container" = "guides/container.md" },
     { "Transfers" = "transfers.md" },
     { "Offline packaging" = "offline.md" },
     { "Delivery updates" = "delivery-updates.md" },

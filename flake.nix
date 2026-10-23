@@ -32,10 +32,15 @@
             else
               "dev";
           go = pkgs.callPackage ./nix/go.nix { };
+          development = pkgs.callPackage ./nix/development.nix { go_1_27 = go; };
+          security = pkgs.callPackage ./nix/security.nix { };
           bale = pkgs.callPackage ./nix/package.nix {
             inherit version;
             go_1_27 = go;
           };
+          container = pkgs.callPackage ./nix/container.nix { inherit bale; };
+          release-commands = pkgs.callPackage ./nix/release-commands.nix { inherit container; };
+          wasm-contract-fixture = pkgs.callPackage ./nix/wasm-contract-fixture.nix { };
           helm-plugin = pkgs.callPackage ./nix/helm-plugin.nix {
             inherit version;
             go_1_27 = go;
@@ -86,6 +91,8 @@
             default = bale;
             inherit
               bale
+              container
+              wasm-contract-fixture
               docs
               release-binary
               helm-plugin
@@ -98,30 +105,48 @@
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             kubernetes-acceptance = kubernetes-acceptance.runner;
           };
-          apps = {
-            default = config.apps.bale;
-            docs-preview = inputs.strio-theme.lib.mkPreview {
-              inherit system;
-              sourcePaths = [
-                "docs"
-                "zensical.toml"
-              ];
-            };
-            bale = {
+          apps =
+            pkgs.lib.mapAttrs' (
+              name: command:
+              pkgs.lib.nameValuePair "dev-${name}" {
+                type = "app";
+                program = "${command}/bin/bale-dev-${name}";
+              }
+            ) development.commands
+            // {
+              scan = {
+                type = "app";
+                program = "${security.scan}/bin/bale-scan";
+              };
+            }
+            // pkgs.lib.mapAttrs (name: command: {
               type = "app";
-              program = "${bale}/bin/bale";
+              program = "${command}/bin/bale-${name}";
+            }) (pkgs.lib.filterAttrs (_: pkgs.lib.isDerivation) release-commands)
+            // {
+              default = config.apps.bale;
+              docs-preview = inputs.strio-theme.lib.mkPreview {
+                inherit system;
+                sourcePaths = [
+                  "docs"
+                  "zensical.toml"
+                ];
+              };
+              bale = {
+                type = "app";
+                program = "${bale}/bin/bale";
+              };
+              registry-acceptance = {
+                type = "app";
+                program = "${registry-acceptance}/bin/bale-registry-acceptance";
+              };
+            }
+            // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+              kubernetes-acceptance = {
+                type = "app";
+                program = "${kubernetes-acceptance.runner}/bin/bale-kubernetes-acceptance";
+              };
             };
-            registry-acceptance = {
-              type = "app";
-              program = "${registry-acceptance}/bin/bale-registry-acceptance";
-            };
-          }
-          // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
-            kubernetes-acceptance = {
-              type = "app";
-              program = "${kubernetes-acceptance.runner}/bin/bale-kubernetes-acceptance";
-            };
-          };
           formatter = pkgs.nixfmt-tree;
           devShells.default = pkgs.callPackage ./nix/devshell.nix {
             inherit bale zensical;
@@ -131,12 +156,22 @@
             packages = [ go ];
             CGO_ENABLED = "0";
           };
-          devShells.security = pkgs.callPackage ./nix/security.nix { };
+          devShells.security = security.shell;
+          devShells.release = pkgs.mkShell {
+            packages = [
+              pkgs.skopeo
+              pkgs.regctl
+              pkgs.kubernetes-helm
+            ];
+          };
           checks = import ./nix/checks.nix {
             inherit
               pkgs
               go
               bale
+              container
+              registry-acceptance
+              wasm-contract-fixture
               docs
               helm-plugin
               helm-consumer

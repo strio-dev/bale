@@ -1,21 +1,20 @@
-The prebuilt `rust-producer.wasm` is a standard WASI preview 1 command compiled
-from the adjacent `rust/` source. It tests stdin, Unicode JSON, stdout and errors
-using a second source language. Its fixture JSON envelope is test data, not the
-Bale plugin protocol. Running Go tests does not require Rust.
+The checked-in `rust-producer.wasm` is a WASI preview 1 command compiled from
+`rust/`. It tests stdin, Unicode JSON, stdout and errors using a second source
+language. Its JSON envelope is test data, not the Bale plugin protocol. Ordinary
+Go tests use the checked-in module and do not require Rust.
 
-To reproduce with Rust 1.90.0 and its `wasm32-wasip1` target installed:
+Rebuild from the repository root with the toolchain and Cargo dependencies
+selected by `flake.lock` and `rust/Cargo.lock`:
 
 ```sh
-cd internal/wasm/testdata
-export RUSTFLAGS="--remap-path-prefix=$PWD=/bale-testdata --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$(rustc +1.90.0 --print sysroot)=/rust-toolchain"
-cargo +1.90.0 test --locked --manifest-path rust/Cargo.toml
-cargo +1.90.0 build --locked --manifest-path rust/Cargo.toml --release --target wasm32-wasip1
-cp rust/target/wasm32-wasip1/release/bale-contract-rust.wasm rust-producer.wasm
+nix build --no-update-lock-file path:.#wasm-contract-fixture --out-link result-wasm-contract-fixture
+cp result-wasm-contract-fixture/lib/bale/rust-producer.wasm internal/wasm/testdata/rust-producer.wasm
 ```
 
-Path remapping keeps local source, dependency-cache and toolchain paths out of
-runtime diagnostics in the distributed fixture; stripping debug data alone does
-not remove them.
+The Nix derivation cross-compiles for `wasm32-wasip1`, strips the module and
+remaps build, dependency-cache and toolchain paths. It does not install Rust or
+use a local rustup toolchain. Bale's WASI contract tests execute the resulting
+module, checking both its response and stderr failure behavior.
 
-SHA-256: `957d48142a70c8e63e97edb26f8f82487194866813552e8c5b607c60bd192a6e`.
+SHA-256: `b5a2d748f5a3080da6b74a6d2b1481a6494dd959a884fa50fda485b8bbd8834c`.
 All fixture source is covered by the repository license.

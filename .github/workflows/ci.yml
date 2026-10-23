@@ -34,8 +34,12 @@ jobs:
       quality: ${{ steps.matrix.outputs.quality }}
       docs: ${{ steps.matrix.outputs.docs }}
       native: ${{ steps.matrix.outputs.native }}
+      registry: ${{ steps.matrix.outputs.registry }}
+      integration: ${{ steps.matrix.outputs.integration }}
       published: ${{ steps.release.outputs.published }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      image: ${{ steps.release.outputs.image }}
+      image-tag: ${{ steps.release.outputs.image-tag }}
     steps:
       - &checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,7 +59,7 @@ jobs:
       - id: matrix
         run: |
           matrices=$(nix eval --json --no-update-lock-file path:.#githubActions.matrices)
-          for category in quality docs native; do
+          for category in quality docs native registry integration; do
             printf '%s=%s\n' "$category" "$(jq -c --arg category "$category" '.[$category]' <<< "$matrices")" >> "$GITHUB_OUTPUT"
           done
       - name: Read release metadata
@@ -73,6 +77,8 @@ jobs:
             }
             core.setOutput('published', Boolean(release && !release.draft));
             core.setOutput('prerelease', tag.split('+', 1)[0].includes('-'));
+            core.setOutput('image', `ghcr.io/${context.repo.owner}/${context.repo.repo}`.toLowerCase());
+            core.setOutput('image-tag', tag.replaceAll('+', '_'));
 
   quality:
     name: Quality checks
@@ -117,6 +123,7 @@ jobs:
 
   native:
     name: Native checks
+    if: github.event_name != 'push' || github.ref_type != 'tag'
     needs: matrix
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
@@ -134,11 +141,34 @@ jobs:
       - *nix
       - *nix-cache
       - *check
+
+  release-native:
+    name: Native release checks
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [matrix, quality, documentation, registry, integration, vulnerabilities]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.native) }}
+    env:
+      NIX_ATTRS: ${{ toJSON(matrix.attrs) }}
+      IMAGE: ${{ needs.matrix.outputs.image }}
+      ARCH: ${{ matrix.system == 'x86_64-linux' && 'amd64' || 'arm64' }}
+    steps:
+      - *checkout
+      - *release-version
+      - *nix
+      - *nix-cache
+      - *check
       - name: Locate release archive
-        if: github.event_name == 'push' && github.ref_type == 'tag' && needs.matrix.outputs.published != 'true'
+        if: needs.matrix.outputs.published != 'true'
         run: nix build --out-link result-release --no-update-lock-file path:.#release-binary
       - name: Upload release artifacts
-        if: github.event_name == 'push' && github.ref_type == 'tag' && needs.matrix.outputs.published != 'true'
+        if: needs.matrix.outputs.published != 'true'
         uses: &upload-artifact actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.system }}
@@ -146,6 +176,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+          overwrite: true
+
+      - name: Log in to GHCR
+        if: needs.matrix.outputs.published != 'true'
+        uses: &registry-login docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with: &registry-credentials
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push native container
+        if: needs.matrix.outputs.published != 'true'
+        run: |
+          nix run --no-update-lock-file path:.#container-push -- \
+            "$IMAGE:build-$GITHUB_RUN_ID-$ARCH" --digestfile "container-$ARCH.digest"
+      - name: Upload container digest
+        if: needs.matrix.outputs.published != 'true'
+        uses: *upload-artifact
+        with:
+          name: container-${{ matrix.system }}
+          path: container-*.digest
+          if-no-files-found: error
+          retention-days: 7
           overwrite: true
 
   vulnerabilities:
@@ -157,24 +209,35 @@ jobs:
       - *nix
       - *nix-cache
       - name: Check all Go modules
-        run: |
-          nix develop --no-update-lock-file path:. --command bash -e <<'SCRIPT'
-            for module in . plugins/helm plugins/helm-relocate; do
-              (cd "$module" && govulncheck ./...)
-            done
-          SCRIPT
+        run: nix run --no-update-lock-file path:.#dev-vuln
 
   registry:
     name: Registry acceptance
-    runs-on: ubuntu-24.04
+    needs: matrix
+    runs-on: ${{ fromJSON(needs.matrix.outputs.registry).include[0].os }}
     timeout-minutes: 45
+    env:
+      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.registry).include[0].attrs) }}
     steps:
       - *checkout
       - *release-version
       - *nix
       - *nix-cache
-      - name: Test Distribution and Zot
-        run: nix run --no-update-lock-file path:.#registry-acceptance
+      - *check
+
+  integration:
+    name: Container acceptance
+    needs: matrix
+    runs-on: ${{ fromJSON(needs.matrix.outputs.integration).include[0].os }}
+    timeout-minutes: 45
+    env:
+      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.integration).include[0].attrs) }}
+    steps:
+      - *checkout
+      - *release-version
+      - *nix
+      - *nix-cache
+      - *check
 
   kubernetes:
     name: Kubernetes acceptance
@@ -185,12 +248,6 @@ jobs:
       - *checkout
       - *nix
       - *nix-cache
-      - name: Require KVM
-        run: |
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo 'Kubernetes acceptance requires readable and writable /dev/kvm.' >&2
-            exit 1
-          fi
       - name: Test Helm and Flux offline
         run: nix run --no-update-lock-file path:.#kubernetes-acceptance -- --output "$RUNNER_TEMP/kubernetes-evidence"
       - name: Upload Kubernetes evidence
@@ -205,7 +262,7 @@ jobs:
   docs:
     name: docs
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [quality, documentation, native, registry, vulnerabilities]
+    needs: [quality, documentation, native, registry, integration, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -223,9 +280,9 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   release:
-    name: Publish binaries
+    name: Publish binaries and containers
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [matrix, quality, documentation, native, registry, vulnerabilities]
+    needs: [matrix, quality, documentation, release-native, registry, integration, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -234,6 +291,10 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      packages: write
+    env:
+      IMAGE: ${{ needs.matrix.outputs.image }}
+      IMAGE_TAG: ${{ needs.matrix.outputs.image-tag }}
     steps:
       - *checkout
       - *release-version
@@ -254,17 +315,33 @@ jobs:
             core.setOutput('published', Boolean(release && !release.draft));
       - name: Download release artifacts
         if: steps.state.outputs.published != 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: &download-artifact actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           merge-multiple: true
           path: dist/
       - name: Collect checksums
         if: steps.state.outputs.published != 'true'
+        run: nix run --no-update-lock-file path:.#release-checksums -- dist
+      - name: Download container digests
+        if: steps.state.outputs.published != 'true'
+        uses: *download-artifact
+        with:
+          pattern: container-*
+          merge-multiple: true
+          path: container-digests/
+      - name: Log in to GHCR
+        uses: *registry-login
+        with: *registry-credentials
+      - name: Publish multi-platform index
+        if: steps.state.outputs.published != 'true'
+        id: container
         run: |
-          test -f dist/bale-linux-amd64.tar.gz
-          test -f dist/bale-linux-arm64.tar.gz
-          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+          amd64=$(cat container-digests/container-amd64.digest)
+          arm64=$(cat container-digests/container-arm64.digest)
+          digest=$(nix run --no-update-lock-file path:.#container-index -- "$IMAGE" "$IMAGE_TAG" "$amd64" "$arm64")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - name: Upload release assets
         if: steps.state.outputs.published != 'true'
         uses: &github-release softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -286,3 +363,23 @@ jobs:
           draft: false
           prerelease: ${{ needs.matrix.outputs.prerelease }}
           make_latest: ${{ needs.matrix.outputs.prerelease != 'true' }}
+      - name: Check latest release on rerun
+        if: steps.state.outputs.published == 'true' && needs.matrix.outputs.prerelease != 'true'
+        id: latest
+        uses: *github-script
+        with:
+          retries: 3
+          retry-exempt-status-codes: '400,401,403,422'
+          script: |
+            const { data: latest } = await github.rest.repos.getLatestRelease(context.repo);
+            core.setOutput('current', latest.tag_name === process.env.GITHUB_REF_NAME);
+      - name: Update latest container alias
+        if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published != 'true'
+        env:
+          PUBLISHED_DIGEST: ${{ steps.container.outputs.digest }}
+        run: |
+          nix run --no-update-lock-file path:.#container-latest -- "$IMAGE" "$PUBLISHED_DIGEST"
+      - name: Retry latest container alias
+        if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published == 'true' && steps.latest.outputs.current == 'true'
+        run: |
+          nix run --no-update-lock-file path:.#container-latest -- "$IMAGE" "$IMAGE_TAG"

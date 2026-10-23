@@ -19,6 +19,12 @@ curl -fsSL https://bale.strio.dev/install.sh | BALE_INSTALL_PREFIX="$HOME/.local
 
 Add `$HOME/.local/bin` to `PATH` if needed. To select a version, append `-s -- TAG` to `sh`, replacing `TAG` with an exact tag from [GitHub releases](https://github.com/strio-dev/bale/releases).
 
+## Run in a container
+
+The Bale image includes the CLI and CA certificates for Linux AMD64 and ARM64:
+
+[Run Bale in a container](guides/container.md){ .md-button .strio-container-link }
+
 ## Create your first bundle
 
 [**Capture and carry a container image**

@@ -2,6 +2,8 @@
   lib,
   stdenvNoCC,
   fetchurl,
+  autoPatchelfHook,
+  glibc,
 }:
 let
   assets = {
@@ -25,6 +27,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   };
   dontUnpack = true;
   dontStrip = true;
+  nativeBuildInputs = [ autoPatchelfHook ];
+  buildInputs = [ glibc ];
   installPhase = ''
     runHook preInstall
     install -Dm755 "$src" "$out/bin/zot"

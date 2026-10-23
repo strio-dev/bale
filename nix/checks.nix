@@ -2,6 +2,9 @@
   pkgs,
   go,
   bale,
+  container,
+  registry-acceptance,
+  wasm-contract-fixture,
   docs,
   helm-plugin,
   helm-consumer,
@@ -24,7 +27,16 @@ let
 in
 {
   build = bale;
+  inherit container;
   release-binary = release.check;
+  wasm-contract-fixture = pkgs.runCommand "bale-wasm-contract-fixture-check" { } ''
+    cmp ${wasm-contract-fixture}/lib/bale/rust-producer.wasm ${../internal/wasm/testdata/rust-producer.wasm}
+    touch "$out"
+  '';
+  registry-acceptance = pkgs.runCommand "bale-registry-acceptance-check" { } ''
+    ${registry-acceptance}/bin/bale-registry-acceptance
+    touch "$out"
+  '';
   installer = pkgs.callPackage ./installer-check.nix { };
   go-check = quality;
   inherit
@@ -68,11 +80,16 @@ in
       }
       ''
         test -z "$(gofmt -l ${bale.src} ${helm-plugin.src} ${helm-consumer.src})"
-        nixfmt --check ${../flake.nix} ${./.}/*.nix
+        find ${../flake.nix} ${./.} -name '*.nix' -type f -print0 | xargs -0 nixfmt --check
         touch "$out"
       '';
   justfile = pkgs.runCommand "bale-justfile" { nativeBuildInputs = [ pkgs.just ]; } ''
     just --justfile ${../Justfile} --fmt --check
     touch "$out"
   '';
+}
+// pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+  container-acceptance = pkgs.callPackage ./container-acceptance.nix {
+    inherit container registry-acceptance;
+  };
 }

@@ -10,6 +10,7 @@
   version ? "dev",
 }:
 let
+  caNotices = import ./ca-notices.nix { inherit lib runCommand cacert; };
   archive = dockerTools.buildLayeredImage {
     name = "bale-flux";
     tag = version;
@@ -23,6 +24,7 @@ let
       install -Dm444 ${cacert}/etc/ssl/certs/ca-bundle.crt etc/ssl/certs/ca-certificates.crt
       install -Dm444 ${../LICENSE} usr/share/licenses/bale/LICENSE
       cp -r ${flux-service}/share/licenses/bale-flux-service/third-party usr/share/licenses/bale/third-party
+      cp -r ${caNotices} usr/share/licenses/mozilla-ca
       mkdir -p home/bale tmp
       chmod 755 home home/bale
       chmod 1777 tmp
@@ -71,5 +73,5 @@ runCommand "bale-flux-image-${version}"
     skopeo --insecure-policy copy --format oci \
       docker-archive:${archive} oci:$out:${version}
     python3 ${../tests/packaging/flux_image.py} "$out" \
-      ${flux-service}/bin/bale-flux ${cacert}/etc/ssl/certs/ca-bundle.crt
+      ${flux-service}/bin/bale-flux ${cacert}/etc/ssl/certs/ca-bundle.crt ${caNotices}
   ''

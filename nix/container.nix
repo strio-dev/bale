@@ -27,8 +27,8 @@ let
       mkdir -p usr/share/licenses
       cp -r ${bale}/share/licenses/bale usr/share/licenses/bale
       cp -r ${caNotices} usr/share/licenses/mozilla-ca
-      mkdir -p work tmp cache
-      chmod 1777 work tmp cache
+      mkdir -p work tmp cache data
+      chmod 1777 work tmp cache data
       printf '%s\n' 'bale:x:65532:65532:Bale:/tmp:/sbin/nologin' > etc/passwd
       printf '%s\n' 'bale:x:65532:' > etc/group
       chmod 444 etc/passwd etc/group
@@ -40,6 +40,7 @@ let
       Env = [
         "HOME=/tmp"
         "XDG_CACHE_HOME=/cache"
+        "XDG_DATA_HOME=/data"
         "TMPDIR=/tmp"
         "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
       ];

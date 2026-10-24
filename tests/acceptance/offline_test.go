@@ -186,32 +186,39 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	if err := os.Mkdir(dockerConfig, 0700); err != nil {
 		t.Fatal(err)
 	}
-	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"DOCKER_CONFIG=" + dockerConfig, "XDG_CACHE_HOME=" + filepath.Join(dir, "cache")}, hosts: []string{sourceHost, destination.host}}
+	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"DOCKER_CONFIG=" + dockerConfig, "XDG_CACHE_HOME=" + filepath.Join(dir, "cache"), "XDG_DATA_HOME=" + filepath.Join(dir, "data")}, hosts: []string{sourceHost, destination.host}}
 	readOnly.Store(true)
 	original := filepath.Join(dir, "release")
 	deliveryPath := filepath.Join(dir, "bale.delivery.yaml")
-	captureArgs := []string{"create", "-f", recipe, original}
-	if !metadataOnly {
-		captureArgs = append(captureArgs, "--layout")
+	captureArgs := []string{"create", "--layout", "-f", recipe, original}
+	inspectArgs := []string{"inspect", "--layout", original}
+	if metadataOnly {
+		original = "offline:v1"
+		captureArgs = []string{"create", "-t", original, "-f", recipe}
+		inspectArgs = []string{"inspect", original}
 	}
 	dry := decode[bale.CreateResult](t, run(command, "local capture preview", append(append([]string{}, captureArgs...), "--dry-run", "--format", "json")...))
 	if dry.Published || !dry.DryRun || dry.LayoutPath != "" {
 		t.Fatal("local preview reported publication")
 	}
-	if _, err := os.Stat(original); !os.IsNotExist(err) {
+	if metadataOnly {
+		if _, _, code := command.execute("dry run retains no managed bundle", "inspect", original); code != 125 {
+			t.Fatalf("dry run retained a managed bundle: inspect exit %d", code)
+		}
+	} else if _, err := os.Stat(original); !os.IsNotExist(err) {
 		t.Fatal("dry run created a layout")
 	}
 	captured := decode[bale.CreateResult](t, run(command, "read-only local capture", append(append([]string{}, captureArgs...), "--output-delivery", deliveryPath, "--format", "json")...))
 	if captured.MetadataOnly != metadataOnly || (metadataOnly && opaqueReads.Load() != 0) {
 		t.Fatalf("metadata capture downloaded application payloads or misreported mode: mode=%t reads=%d", captured.MetadataOnly, opaqueReads.Load())
 	}
-	if captured.Published || captured.LayoutPath != original || captured.Descriptor.Digest != dry.Descriptor.Digest {
+	if captured.Published || (metadataOnly && captured.LayoutPath != "") || (!metadataOnly && captured.LayoutPath != original) || captured.Descriptor.Digest != dry.Descriptor.Digest {
 		t.Fatal("local capture changed digest or registry publication semantics")
 	}
 	if sourceWrites.Load() != 0 || sourceReads.Load() == 0 {
 		t.Fatalf("source access: %d writes, %d reads", sourceWrites.Load(), sourceReads.Load())
 	}
-	before := decode[[]bale.InspectResult](t, run(command, "inspect captured local bundle", "inspect", "--layout", original))
+	before := decode[[]bale.InspectResult](t, run(command, "inspect captured local bundle", inspectArgs...))
 	if len(before) != 1 || len(before[0].Metadata.Plugins) != 1 {
 		t.Fatal("local capture omitted plugin provenance")
 	}
@@ -268,22 +275,28 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	offline.env = append(append([]string{}, command.env...), "PATH="+helperDir)
 	readsBefore := sourceReads.Load()
 	if !metadataOnly {
-		saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", original, "-o", archive, "--format", "json"))
+		saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", "--layout", original, "-o", archive, "--format", "json"))
 		if saved.Descriptor.Digest != captured.Descriptor.Digest {
 			t.Fatal("save changed bundle digest")
 		}
 	} else {
-		inspected := decode[[]bale.InspectResult](t, run(offline, "metadata inspection after source shutdown", "inspect", "--layout", original))
-		if len(inspected) != 1 || !inspected[0].MetadataOnly {
-			t.Fatal("offline metadata inspection failed")
+		inspected := decode[[]bale.InspectResult](t, run(offline, "hydrated managed inspection after source shutdown", "inspect", original))
+		if len(inspected) != 1 || inspected[0].MetadataOnly {
+			t.Fatal("managed save did not retain complete offline content")
+		}
+		saved := decode[bale.ArchiveResult](t, run(offline, "resave hydrated managed bundle offline", "save", original, "-o", filepath.Join(dir, "hydrated.tar"), "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("offline managed save changed bundle identity")
 		}
 	}
 	assertArchiveDeduplicated(t, archive)
-	if err := os.RemoveAll(original); err != nil {
+	if metadataOnly {
+		run(offline, "remove managed capture", "rm", original)
+	} else if err := os.RemoveAll(original); err != nil {
 		t.Fatal(err)
 	}
 	restoredPath := filepath.Join(dir, "restored")
-	loaded := decode[bale.ArchiveResult](t, run(offline, "load removable-media archive", "load", "-i", archive, restoredPath, "--format", "json"))
+	loaded := decode[bale.ArchiveResult](t, run(offline, "load removable-media archive", "load", "--layout", "-i", archive, restoredPath, "--format", "json"))
 	if loaded.Descriptor.Digest != captured.Descriptor.Digest || loaded.LayoutPath != restoredPath || loaded.ArchivePath != archive {
 		t.Fatal("load did not retain archive identity")
 	}
@@ -319,7 +332,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	}
 	writeFile(t, deliveryPath, raw)
 	completion := destination.host + "/offline-release:bundle"
-	plan := decode[bale.DeliveryPlan](t, run(offline, "preview restored delivery", "push", restoredPath, completion, "--delivery", deliveryPath, "--dry-run", "--format", "json"))
+	plan := decode[bale.DeliveryPlan](t, run(offline, "preview restored delivery", "push", "--layout", restoredPath, completion, "--delivery", deliveryPath, "--dry-run", "--format", "json"))
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatal("offline operation invoked credential helper")
 	}
@@ -330,7 +343,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	if err := os.Remove(filepath.Join(dockerConfig, "config.json")); err != nil {
 		t.Fatal(err)
 	}
-	result := decode[bale.PushResult](t, run(command, "deliver restored bundle", "push", restoredPath, completion, "--delivery", deliveryPath, "--format", "json"))
+	result := decode[bale.PushResult](t, run(command, "deliver restored bundle", "push", "--layout", restoredPath, completion, "--delivery", deliveryPath, "--format", "json"))
 	if result.Descriptor.Digest != captured.Descriptor.Digest || len(result.Destinations) == 0 {
 		t.Fatal("restored delivery changed bundle or omitted records")
 	}
@@ -373,7 +386,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		t.Fatal("destination-only discovery omitted dependency record")
 	}
 	finalPath := filepath.Join(dir, "destination-only")
-	run(command, "fresh destination-only pull", "pull", completion, finalPath)
+	run(command, "fresh destination-only pull", "pull", "--layout", completion, finalPath)
 	final := decode[[]bale.InspectResult](t, run(command, "verify destination-only bundle", "inspect", "--layout", finalPath))
 	if len(final) != 1 {
 		t.Fatalf("destination-only inspection returned %d bundles, want 1", len(final))

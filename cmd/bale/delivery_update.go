@@ -35,14 +35,16 @@ Usage:
 Options:
   -f, --file FILE         Existing delivery YAML bound to BEFORE (required)
   -o, --output FILE       New delivery YAML; must not exist (required)
-      --layout            Interpret both operands as local OCI layout directories
+      --store PATH        Override the managed local store
+      --registry          Interpret both operands as registry references
+      --layout            Interpret both operands as explicit OCI layout directories
       --format FORMAT     Output JSON or a Go template (default: readable report)
       --plain-http HOST   Permit HTTP for this exact registry host (repeatable)
   -h, --help              Help for delivery update
 
 Examples:
-  bale delivery update --layout ./locked ./refreshed -f bale.delivery.yaml -o refreshed.delivery.yaml
-  bale delivery update registry.example.com/bundles:v1 registry.example.com/bundles:v2 -f old.yaml -o new.yaml
+  bale delivery update release:v1 release:v2 -f bale.delivery.yaml -o refreshed.delivery.yaml
+  bale delivery update --registry registry.example.com/bundles:v1 registry.example.com/bundles:v2 -f old.yaml -o new.yaml
 
 Preserves exact identities and follows one-to-one captured selector changes.
 New artifacts receive defaults; removals and ambiguous paths are reported.
@@ -76,7 +78,7 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if err := validateHTTP(opts.plainHTTP); err != nil {
 		return fail(errOut, err)
 	}
-	if !opts.layout {
+	if opts.registry {
 		for _, ref := range opts.args {
 			if err := explicitReference(ref, false); err != nil {
 				return fail(errOut, fmt.Errorf("%q: %w", ref, err))
@@ -100,15 +102,23 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 		return fail(errOut, err)
 	}
 	defer output.close()
-	client, err := newCLIClient(opts, nil)
-	if err != nil {
-		return fail(errOut, err)
-	}
 	var result bale.DeliveryUpdateResult
-	if opts.layout {
-		result, err = client.UpdateDeliveryLayouts(ctx, opts.args[0], opts.args[1], file)
+	if !opts.layout && !opts.registry {
+		local, openErr := openManaged(ctx, opts, nil)
+		if openErr != nil {
+			return fail(errOut, openErr)
+		}
+		result, err = local.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
 	} else {
-		result, err = client.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
+		client, openErr := newCLIClient(opts, nil)
+		if openErr != nil {
+			return fail(errOut, openErr)
+		}
+		if opts.layout {
+			result, err = client.UpdateDeliveryLayouts(ctx, opts.args[0], opts.args[1], file)
+		} else {
+			result, err = client.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
+		}
 	}
 	if err != nil && !errors.Is(err, bale.ErrConflict) {
 		return fail(errOut, err)

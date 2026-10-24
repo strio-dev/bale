@@ -24,9 +24,9 @@ import (
 const captureFile = "bale-capture.json"
 const maxCaptureBytes = 16 << 20
 
-// localCapture is local source-location metadata, not part of the transferable
-// bundle graph. Only omitted opaque payloads can have remote locators.
-type localCapture struct {
+// CaptureState records pinned payload locations outside the transferable bundle
+// graph. Locators remain valid as a shared store hydrates their payloads.
+type CaptureState struct {
 	SchemaVersion int                      `json:"schemaVersion"`
 	Bundle        digest.Digest            `json:"bundle"`
 	Sources       map[digest.Digest]string `json:"sources"`
@@ -44,78 +44,21 @@ func (s *Service) CreateLocal(ctx context.Context, recipe config.Recipe, path st
 	if err := checkLayoutDestination(path); err != nil {
 		return result, err
 	}
-	g, snapshot, err := s.capture(ctx, recipe)
+	g, snapshot, prepared, err := s.prepareMetadataCapture(ctx, recipe, opts)
+	result = prepared
 	if err != nil {
 		return result, err
 	}
-	result = CreateResult{Descriptor: snapshot.Descriptor, Metadata: snapshot.Metadata, MetadataOnly: true, DryRun: opts.DryRun, Stats: g.stats}
 	defer func() {
 		result.Stats.BlobBytesDownloaded = g.stats.BlobBytesDownloaded
 		result.Stats.ManifestBytesDownloaded = g.stats.ManifestBytesDownloaded
 	}()
-	if opts.ExportDelivery {
-		file, err := deliveryFromCapture(ctx, g, snapshot)
-		if err != nil {
-			return result, err
-		}
-		result.Delivery = &file
-	}
 	if opts.DryRun {
 		return result, nil
 	}
 	err = publishLocalLayout(ctx, path, snapshot.Descriptor, func(store *oci.Storage, directory string) error {
-		recording := captureRecorder{source: captureDeliveryStore{g}, target: store}
-		if _, err := bundle.InspectSnapshotGraph(ctx, recording, snapshot.Descriptor); err != nil {
-			return err
-		}
-		// Inline content can share a digest with a non-inline edge. Retain its
-		// standalone bytes even when capture first visited the non-inline edge.
-		for _, origin := range snapshot.Metadata.Origins {
-			raw, err := fetchEnvelopeBytes(ctx, store, origin.Descriptor)
-			if err != nil {
-				return err
-			}
-			envelope, err := bundle.ParseEnvelope(origin.Descriptor, raw)
-			if err != nil {
-				return err
-			}
-			for _, child := range envelope.Children {
-				if child.Data != nil {
-					if err := store.Push(ctx, child, bytes.NewReader(child.Data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
-						return err
-					}
-				}
-			}
-		}
-		state := localCapture{SchemaVersion: 1, Bundle: snapshot.Descriptor.Digest, Sources: map[digest.Digest]string{}}
-		for dgst, d := range g.nodes {
-			exists, err := store.Exists(ctx, d)
-			if err != nil {
-				return err
-			}
-			if exists {
-				continue
-			}
-			if d.Data != nil {
-				if err := store.Push(ctx, d, bytes.NewReader(d.Data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
-					return err
-				}
-				continue
-			}
-			// Generated content has no published source and must never be omitted.
-			generated, err := g.generated(ctx, d)
-			if err != nil {
-				return err
-			}
-			if generated {
-				if err := copyCaptureObject(ctx, g, store, d); err != nil {
-					return err
-				}
-				continue
-			}
-			state.Sources[dgst] = g.source[dgst]
-		}
-		if err := validateLocalCapture(ctx, store, snapshot, state); err != nil {
+		state, err := retainMetadataCapture(ctx, g, snapshot, store)
+		if err != nil {
 			return err
 		}
 		raw, err := json.Marshal(state)
@@ -135,9 +78,124 @@ func (s *Service) CreateLocal(ctx context.Context, recipe config.Recipe, path st
 	return result, nil
 }
 
+// CreateInto retains a source-dependent metadata capture in caller-owned storage.
+// The caller owns publication of its root reference and coordination with GC.
+// Failed calls may leave unreferenced verified objects in target.
+func (s *Service) CreateInto(ctx context.Context, recipe config.Recipe, target content.Storage, opts CreateOptions) (result CreateResult, state *CaptureState, retErr error) {
+	defer func() {
+		if retErr != nil {
+			retErr = operationError("create", "", result.Descriptor, nil, retErr)
+		}
+	}()
+	if target == nil {
+		return result, nil, operationError("create", "", result.Descriptor, ErrInvalid, fmt.Errorf("target storage is required"))
+	}
+	g, snapshot, prepared, err := s.prepareMetadataCapture(ctx, recipe, opts)
+	result = prepared
+	if err != nil {
+		return result, nil, err
+	}
+	defer func() {
+		result.Stats.BlobBytesDownloaded = g.stats.BlobBytesDownloaded
+		result.Stats.ManifestBytesDownloaded = g.stats.ManifestBytesDownloaded
+	}()
+	if opts.DryRun {
+		return result, nil, nil
+	}
+	state, err = retainMetadataCapture(ctx, g, snapshot, target)
+	if err != nil {
+		return result, nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return result, nil, err
+	}
+	return result, state, nil
+}
+
+func (s *Service) prepareMetadataCapture(ctx context.Context, recipe config.Recipe, opts CreateOptions) (*graph, bundle.Snapshot, CreateResult, error) {
+	g, snapshot, err := s.capture(ctx, recipe)
+	if err != nil {
+		return nil, bundle.Snapshot{}, CreateResult{}, err
+	}
+	result := CreateResult{Descriptor: snapshot.Descriptor, Metadata: snapshot.Metadata, MetadataOnly: true, DryRun: opts.DryRun, Stats: g.stats}
+	if opts.ExportDelivery {
+		file, err := deliveryFromCapture(ctx, g, snapshot)
+		if err != nil {
+			return nil, bundle.Snapshot{}, result, err
+		}
+		result.Delivery = &file
+	}
+	return g, snapshot, result, nil
+}
+
+func retainMetadataCapture(ctx context.Context, g *graph, snapshot bundle.Snapshot, store content.Storage) (*CaptureState, error) {
+	recording := captureRecorder{source: captureDeliveryStore{g}, target: store}
+	if _, err := bundle.InspectSnapshotGraph(ctx, recording, snapshot.Descriptor); err != nil {
+		return nil, err
+	}
+	// Inline content can share a digest with a non-inline edge. Retain its
+	// standalone bytes even when capture first visited the non-inline edge.
+	for _, origin := range snapshot.Metadata.Origins {
+		raw, err := fetchEnvelopeBytes(ctx, store, origin.Descriptor)
+		if err != nil {
+			return nil, err
+		}
+		envelope, err := bundle.ParseEnvelope(origin.Descriptor, raw)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range envelope.Children {
+			if child.Data != nil {
+				if err := store.Push(ctx, child, bytes.NewReader(child.Data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+					return nil, err
+				}
+			}
+		}
+	}
+	state := CaptureState{SchemaVersion: 1, Bundle: snapshot.Descriptor.Digest, Sources: map[digest.Digest]string{}}
+	for dgst, d := range g.nodes {
+		exists, err := store.Exists(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			continue
+		}
+		if d.Data != nil {
+			if err := store.Push(ctx, d, bytes.NewReader(d.Data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+				return nil, err
+			}
+			continue
+		}
+		// Generated content has no published source and must never be omitted.
+		generated, err := g.generated(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		if generated {
+			if err := copyCaptureObject(ctx, g, store, d); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		state.Sources[dgst] = g.source[dgst]
+	}
+	if err := ValidateCaptureState(ctx, store, snapshot, state); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxCaptureBytes {
+		return nil, fmt.Errorf("local capture metadata exceeds %d bytes", maxCaptureBytes)
+	}
+	return &state, nil
+}
+
 type captureRecorder struct {
 	source content.ReadOnlyStorage
-	target *oci.Storage
+	target content.Storage
 }
 
 func (r captureRecorder) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadCloser, error) {
@@ -166,7 +224,7 @@ func copyCaptureObject(ctx context.Context, src content.Fetcher, dst content.Sto
 	return verified.Verify()
 }
 
-func readLocalCapture(ctx context.Context, path string, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*localCapture, digest.Digest, error) {
+func readLocalCapture(ctx context.Context, path string, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {
 	filename := filepath.Join(path, captureFile)
 	entry, err := os.Lstat(filename)
 	if os.IsNotExist(err) {
@@ -205,17 +263,22 @@ func readLocalCapture(ctx context.Context, path string, store content.ReadOnlySt
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var state localCapture
+	var state CaptureState
 	if err := dec.Decode(&state); err != nil {
 		return nil, "", err
 	}
-	if err := validateLocalCapture(ctx, store, snapshot, state); err != nil {
+	if err := ValidateCaptureState(ctx, store, snapshot, state); err != nil {
 		return nil, "", err
 	}
 	return &state, digest.FromBytes(raw), nil
 }
 
-func validateLocalCapture(ctx context.Context, store content.ReadOnlyStorage, snapshot bundle.Snapshot, state localCapture) error {
+// ValidateCaptureState checks source locators against locally verified capture
+// metadata. Opaque payloads already present in a shared store remain valid.
+func ValidateCaptureState(ctx context.Context, store content.ReadOnlyStorage, snapshot bundle.Snapshot, state CaptureState) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if state.SchemaVersion != 1 || state.Bundle != snapshot.Descriptor.Digest || state.Sources == nil {
 		return fmt.Errorf("invalid local capture version, bundle or sources")
 	}
@@ -249,14 +312,8 @@ func validateLocalCapture(ctx context.Context, store content.ReadOnlyStorage, sn
 		if err != nil || ref.Reference != "" || repositoryName(ref) != repository {
 			return fmt.Errorf("invalid capture source repository %q", repository)
 		}
-		d, ok := allowed[dgst][repository]
-		if !ok {
+		if _, ok := allowed[dgst][repository]; !ok {
 			return fmt.Errorf("capture source %s is not a reachable opaque child in %s", dgst, repository)
-		}
-		if exists, err := store.Exists(ctx, d); err != nil {
-			return err
-		} else if exists {
-			return fmt.Errorf("capture source %s is already retained locally", dgst)
 		}
 	}
 	// Every omitted opaque child needs an explicit validated locator. Envelopes
@@ -317,7 +374,7 @@ func (s captureSource) Exists(ctx context.Context, d v1.Descriptor) (bool, error
 
 // openLocalBundle never silently turns a damaged complete layout into an
 // online source. Remote payload fallback requires the explicit capture marker.
-func (s *Service) openLocalBundle(ctx context.Context, path string) (content.ReadOnlyStorage, bundle.Snapshot, *localCapture, digest.Digest, error) {
+func (s *Service) openLocalBundle(ctx context.Context, path string) (content.ReadOnlyStorage, bundle.Snapshot, *CaptureState, digest.Digest, error) {
 	store, root, err := readLayoutRoot(path)
 	if err != nil {
 		return nil, bundle.Snapshot{}, nil, "", err

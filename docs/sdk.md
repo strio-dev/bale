@@ -25,39 +25,51 @@ Capture progress reports resolution, plugin fetch/run and capture phases; `captu
 
 ## Capture and archive locally
 
+Import `github.com/strio-dev/bale/store` as `store`. The managed store shares blobs across retained bundle IDs and optional local names:
+
 ```go
+local, err := store.Open(client, store.Options{})
+if err != nil {
+    return err
+}
 recipe, err := bale.ParseRecipe([]byte(`include:
   - registry.example.com/apps/web:stable
 `))
 if err != nil {
     return err
 }
-captured, err := client.CreateLocal(ctx, recipe, "./release", bale.CreateOptions{
+captured, err := local.Create(ctx, recipe, store.CreateOptions{
+    Tags:           []string{"release:v1"},
     ExportDelivery: true,
 })
 if err != nil {
     return err
 }
-_, err = client.Save(ctx, captured.LayoutPath, "./release.tar")
+_, err = local.Save(ctx, captured.Descriptor.Digest.String(), "./release.tar")
 if err != nil {
     return err
 }
-_, err = client.Load(ctx, "./release.tar", "./restored")
+_, err = local.Load(ctx, "./release.tar", []string{"restored:v1"})
 return err
 ```
 
-`ParseRecipe` reads strict authoring YAML; `NormalizeRecipe` validates and applies defaults to a deep copy of a Go recipe. `CreateLocal` needs only source read access and returns a source-dependent capture with `MetadataOnly: true`. It retains manifests and interpreted metadata without downloading ordinary image payloads; discovery may read chart and plugin bytes. `CreateLayout` instead downloads a complete offline layout. `CreateOptions.DryRun` retains no local output; `ExportDelivery` returns paths from that exact capture. `LayoutPath` confirms completed local output; `Published` is reserved for registry publication.
+`store.Options.Path` selects a store. An empty path uses `$XDG_DATA_HOME/bale`, or `~/.local/share/bale`. `ParseRecipe` reads strict authoring YAML; `NormalizeRecipe` validates and applies defaults to a deep copy of a Go recipe.
 
-`Save` reads any missing payloads from the capture's pinned sources and verifies the complete graph before publishing an uncompressed, deduplicated OCI-layout tar archive. Supply credentials and transport options on the client. It preserves the bundle digest and leaves the capture unchanged. Save from a complete layout and `Load` are offline. Both require new destination paths. `ArchiveResult` reports `Descriptor`, `LayoutPath` and `ArchivePath`. Other local APIs take the directory, not the tar filename.
+`local.Create` needs only source read access. It reports `MetadataOnly: true` while required payloads are missing from the shared store. It keeps manifests and interpreted metadata without downloading ordinary image payloads; discovery may read chart and plugin bytes. `store.CreateOptions.DryRun` retains no bundle; `ExportDelivery` returns paths from that exact capture. Managed results leave `LayoutPath` empty and do not publish to registries.
 
-| Operation | API |
+`local.Save` hydrates missing payloads into the shared store from pinned source digests, then exports a complete, deduplicated OCI-layout tar archive. Supply credentials and transport options on the client. The bundle digest is unchanged; subsequent local inspection reports complete content. Save of a complete stored bundle and `local.Load` are offline. Archive output paths must be new.
+
+| Operation | Managed store API |
 | --- | --- |
-| Capture to a registry | `Create(ctx, recipe, reference, options)` |
-| Lock local metadata | `CreateLocal(ctx, recipe, path, options)` |
-| Download a complete local layout | `CreateLayout(ctx, recipe, path, options)` |
-| Retrieve a bundle | `Pull(ctx, reference, path, PullLocked)` or `PullLatest` |
-| Archive / restore | `Save(ctx, layout, archive)` / `Load(ctx, archive, layout)` |
-| Plan / publish a layout | `PlanPush(ctx, layout, destination, options)` / `Push(ctx, plan)` |
+| Capture metadata | `local.Create(ctx, recipe, options)` |
+| Retrieve a bundle | `local.Pull(ctx, reference, store.PullOptions{Mode: bale.PullLocked})` |
+| Archive / import | `local.Save(ctx, name, archive)` / `local.Load(ctx, archive, tags)` |
+| Inspect / compare | `local.Inspect(ctx, name)` / `local.Diff(ctx, before, after)` |
+| Preview / deliver | `local.PlanPush(ctx, name, destination, options)` / `local.Push(ctx, name, destination, options)` |
+
+`local.PlanPush` returns a preview rather than an executable `bale.Client.Push` plan. `List`, `Tag` and `Remove` manage retained roots and names; pruning shared content is explicit.
+
+The client also exposes explicit directory APIs: `CreateLocal` writes a source-dependent metadata layout, while `CreateLayout` downloads a complete offline layout. `Save`, `Load`, `InspectLayout` and `PlanPush` take these standalone paths. Registry `Create` stores a complete bundle in a holding repository. These lower-level APIs preserve the same OCI bundle format.
 
 ## Transfer an artifact graph
 
@@ -163,14 +175,14 @@ Referrer filters apply after validating envelopes and subjects. Without an expli
 
 ## Inspect a bundle
 
-| Operation | Registry | Local layout | Caller-owned root |
-| --- | --- | --- | --- |
-| Inspect | `Inspect` | `InspectLayout` | `InspectRoot` |
-| Compare | `Diff` | `DiffLayouts` | `DiffRoots` |
-| Export delivery paths | `ExportDelivery` | `ExportDeliveryLayout` | `ExportDeliveryRoot` |
-| Carry edited paths forward | `UpdateDelivery` | `UpdateDeliveryLayouts` | `UpdateDeliveryRoots` |
+| Operation | Managed store | Registry client | Explicit layout | Caller-owned root |
+| --- | --- | --- | --- | --- |
+| Inspect | `local.Inspect` | `Inspect` | `InspectLayout` | `InspectRoot` |
+| Compare | `local.Diff` | `Diff` | `DiffLayouts` | `DiffRoots` |
+| Export delivery paths | `local.ExportDelivery` | `ExportDelivery` | `ExportDeliveryLayout` | `ExportDeliveryRoot` |
+| Carry edited paths forward | `local.UpdateDelivery` | `UpdateDelivery` | `UpdateDeliveryLayouts` | `UpdateDeliveryRoots` |
 
-Registry variants pin each reference once; identical operands share a read in comparison and updates. Layout variants are offline. Root variants use pinned descriptors without closing or modifying caller-owned stores.
+Managed methods resolve local IDs or names. Registry variants pin each reference once; identical operands share a read in comparison and updates. Local metadata operations are offline. Root variants use pinned descriptors without closing or modifying caller-owned stores.
 
 `InspectLayout` recognizes marked metadata captures and returns `MetadataOnly: true` after verifying their local manifests and interpreted metadata, including nested bundles. It makes no source requests and does not prove missing payload availability or integrity. Complete layouts, registry inspection and caller-owned roots receive full graph verification, which can hash substantial payloads. Reports include `Descriptor`, `Metadata` and selected `Declarations`. Metadata retains recipes, roots, origins, referrers, dependency resolutions and plugin provenance. Inspect a nested bundle separately with its descriptor and the same store. Failure returns an empty report and typed error; integrity verification does not verify publisher signatures.
 

@@ -11,8 +11,8 @@ Discovery renders chart defaults with release `web`, namespace `apps` and contex
 ## Capture and choose paths
 
 ```sh
-bale create -f bale.yaml ./release --output-delivery bale.delivery.yaml
-bale inspect --layout ./release
+bale create -f bale.yaml -t release:v1 --output-delivery bale.delivery.yaml
+bale inspect release:v1
 ```
 
 Creation reads discovery inputs and locks metadata locally. Keep source access available until save finishes. Review the inventory and edit `path` values in `bale.delivery.yaml`:
@@ -28,20 +28,20 @@ Creation reads discovery inputs and locks metadata locally. Keep source access a
 Keep the bundle digest and artifact references intact. Preserve the native plugin's final repository name `bale`, which Helm uses to find the archive. If your chart has another name, adapt its path and deployment reference too.
 
 ```sh
-bale push ./release mirror.example.com/release:bundle --delivery bale.delivery.yaml --dry-run
-bale save ./release -o release.tar
+bale push release:v1 mirror.example.com/release:bundle --delivery bale.delivery.yaml --dry-run
+bale save release:v1 -o release.tar
 ```
 
-Save downloads the pinned content and validates the complete archive. Carry `release.tar` and the edited delivery file to the receiving machine. Archive and layout output paths must be new. Placement stays separate from captured content.
+Save downloads the pinned content and validates the complete archive. Carry `release.tar` and the edited delivery file to the receiving machine. Archive and delivery file paths must be new. Placement stays separate from captured content.
 
 ## Restore and deliver
 
 The source registries can now be offline:
 
 ```sh
-bale load -i release.tar ./restored
-bale push ./restored mirror.example.com/release:bundle --delivery bale.delivery.yaml --dry-run
-bale push ./restored mirror.example.com/release:bundle --delivery bale.delivery.yaml
+bale load -i release.tar -t restored:v1
+bale push restored:v1 mirror.example.com/release:bundle --delivery bale.delivery.yaml --dry-run
+bale push restored:v1 mirror.example.com/release:bundle --delivery bale.delivery.yaml
 ```
 
 ## Write values and deploy

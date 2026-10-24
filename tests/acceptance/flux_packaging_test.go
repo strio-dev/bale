@@ -46,7 +46,7 @@ func runFluxPackagingCycle(t *testing.T, ctx context.Context, paths []string, ki
 	source := startRegistry(t, ctx, kind, backend, "Flux package source")
 	destination := startRegistry(t, ctx, kind, backend, "Flux package destination")
 	dir := t.TempDir()
-	command := cli{t: t, ctx: ctx, binary: paths[0], hosts: []string{source.host, destination.host}, env: []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + filepath.Join(dir, "docker"), "XDG_CACHE_HOME=" + filepath.Join(dir, "cache")}}
+	command := cli{t: t, ctx: ctx, binary: paths[0], hosts: []string{source.host, destination.host}, env: []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + filepath.Join(dir, "docker"), "XDG_CACHE_HOME=" + filepath.Join(dir, "cache"), "XDG_DATA_HOME=" + filepath.Join(dir, "data")}}
 	client, err := bale.NewClient(bale.ClientOptions{PlainHTTPRegistries: command.hosts})
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func runFluxPackagingCycle(t *testing.T, ctx context.Context, paths []string, ki
 		t.Fatal(err)
 	}
 	writeFile(t, deliveryPath, raw)
-	pushed := decode[bale.PushResult](t, command.run("deliver adapter with source offline", "push", layout, destination.host+"/release:bootstrap", "--delivery", deliveryPath, "--format", "json"))
+	pushed := decode[bale.PushResult](t, command.run("deliver adapter with source offline", "push", "--layout", layout, destination.host+"/release:bootstrap", "--delivery", deliveryPath, "--format", "json"))
 	if pushed.Descriptor.Digest != created.Descriptor.Digest {
 		t.Fatal("delivery changed bundle identity")
 	}

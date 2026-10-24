@@ -60,7 +60,7 @@ func runPublicationChecks(t *testing.T, ctx context.Context, client *bale.Client
 		t.Run("retry-"+stage, func(t *testing.T) {
 			command.t = t
 			completion := host + "/retry-" + stage + ":bundle"
-			args := []string{"push", layout, completion, "--delivery", delivery, "--format", "json"}
+			args := []string{"push", "--layout", layout, completion, "--delivery", delivery, "--format", "json"}
 			plan := decode[bale.DeliveryPlan](t, command.run("recovery preview", append(append([]string{}, args...), "--dry-run")...))
 			placement, ok := plan.Relocations.Lookup(bale.ArtifactID{Repository: runtime.Repository, Digest: runtime.Descriptor.Digest})
 			if !ok || len(plan.Tags) < 2 || len(plan.Destinations) == 0 {
@@ -143,7 +143,7 @@ func runPublicationChecks(t *testing.T, ctx context.Context, client *bale.Client
 				}
 				verifyGraph(t, ctx, root.Store, resolved.Store, root.Descriptor)
 			}
-			pulled := decode[bale.PullResult](t, command.run("pull recovered completion", "pull", completion, t.TempDir()+"/recovered", "--format", "json"))
+			pulled := decode[bale.PullResult](t, command.run("pull recovered completion", "pull", "--layout", completion, t.TempDir()+"/recovered", "--format", "json"))
 			if pulled.Descriptor.Digest != plan.Descriptor.Digest {
 				t.Fatal("recovered bundle changed digest")
 			}
@@ -154,7 +154,7 @@ func runPublicationChecks(t *testing.T, ctx context.Context, client *bale.Client
 			command.t = t
 			name := "conflict-" + collision
 			completion := host + "/" + name + ":bundle"
-			args := []string{"push", layout, completion, "--delivery", delivery, "--format", "json"}
+			args := []string{"push", "--layout", layout, completion, "--delivery", delivery, "--format", "json"}
 			plan := decode[bale.DeliveryPlan](t, command.run("conflict preview", append(append([]string{}, args...), "--dry-run")...))
 			occupied := bale.Tag{Repository: host + "/" + name, Reference: "bundle"}
 			switch collision {

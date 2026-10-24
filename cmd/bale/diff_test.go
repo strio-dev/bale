@@ -127,14 +127,14 @@ func TestDiffCLIRejectsInvalidArgumentsBeforeStorage(t *testing.T) {
 		{[]string{"diff"}, "invalid arguments"},
 		{[]string{"diff", "one"}, "invalid arguments"},
 		{[]string{"diff", "one", "two", "three"}, "invalid arguments"},
-		{[]string{"diff", "example.invalid/bundle:a", "team/b:tag"}, "explicit registry"},
-		{[]string{"diff", "example.invalid/bundle:a", "example.invalid/bundle"}, "explicit tag"},
+		{[]string{"diff", "--registry", "example.invalid/bundle:a", "team/b:tag"}, "explicit registry"},
+		{[]string{"diff", "--registry", "example.invalid/bundle:a", "example.invalid/bundle"}, "explicit tag"},
 		{[]string{"diff", "one", "two", "--layout", "--mode", "latest"}, "unknown option"},
 		{[]string{"diff", "one", "two", "--layout", "--quiet"}, "unknown option"},
 		{[]string{"diff", "one", "two", "--layout", "--output-delivery", "file"}, "unknown option"},
 		{[]string{"diff", "one", "two", "--layout", "-fjson", "--format=json"}, "duplicate option"},
 		{[]string{"diff", "one", "two", "--layout", "-f", "{{"}, "invalid --format"},
-		{[]string{"diff", "example.invalid/bundle:a", "example.invalid/bundle:b", "-f", "{{"}, "invalid --format"},
+		{[]string{"diff", "--registry", "example.invalid/bundle:a", "example.invalid/bundle:b", "-f", "{{"}, "invalid --format"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(tc.args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), tc.want) {
@@ -253,7 +253,7 @@ func TestDiffRegistryCLIUsesCapturedMetadata(t *testing.T) {
 	defer server.Close()
 	host := strings.TrimPrefix(server.URL, "http://")
 	var out, errs bytes.Buffer
-	if code := run([]string{"diff", host + "/bundles:old", host + "/bundles:new", "--plain-http", host, "-f", "{{.Changed}}"}, &out, &errs); code != 0 || out.String() != "false\n" || errs.Len() != 0 {
+	if code := run([]string{"diff", "--registry", host + "/bundles:old", host + "/bundles:new", "--plain-http", host, "-f", "{{.Changed}}"}, &out, &errs); code != 0 || out.String() != "false\n" || errs.Len() != 0 {
 		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	mu.Lock()

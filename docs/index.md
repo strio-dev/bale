@@ -47,8 +47,8 @@ include:
 Lock their current digests, then download a portable archive:
 
 ```sh
-bale create -f bale.yaml ./release
-bale save ./release -o release.tar
+bale create -f bale.yaml -t release:v1
+bale save release:v1 -o release.tar
 ```
 
 The archive contains everything captured by the bundle. [Follow the tutorial](tutorials/first-bundle.md) to restore it, choose delivery paths and push to a receiving registry.

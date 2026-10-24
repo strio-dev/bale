@@ -339,11 +339,11 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	}
 	env := []string{}
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "DOCKER_CONFIG=") {
+		if !strings.HasPrefix(entry, "DOCKER_CONFIG=") && !strings.HasPrefix(entry, "XDG_DATA_HOME=") {
 			env = append(env, entry)
 		}
 	}
-	env = append(env, "DOCKER_CONFIG="+dockerConfig)
+	env = append(env, "DOCKER_CONFIG="+dockerConfig, "XDG_DATA_HOME="+filepath.Join(dir, "data"))
 	command := cli{t: t, ctx: ctx, binary: binary, env: env, hosts: []string{source.host, holding.host, destinationHost}}
 	client, err := bale.NewClient(bale.ClientOptions{PlainHTTPRegistries: command.hosts, HTTPClient: &http.Client{Timeout: 10 * time.Second}})
 	if err != nil {
@@ -365,7 +365,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	bundleRef := holding.host + "/bundles:before"
 	created := decode[bale.CreateResult](t, command.run("capture", "create", "--registry", bundleRef, "--file", recipe, "--output-delivery", oldFile, "--format", "json"))
 	locked, latest := filepath.Join(dir, "locked"), filepath.Join(dir, "latest")
-	command.run("locked pull", "pull", bundleRef, locked)
+	command.run("locked pull", "pull", "--layout", bundleRef, locked)
 	data, err := os.ReadFile(oldFile)
 	if err != nil {
 		t.Fatal(err)
@@ -391,7 +391,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	}
 	writeFile(t, oldFile, data)
 	refreshed := seed(t, ctx, client, source.host, "runtime", "runtime-v2", true)
-	pulled := decode[bale.PullResult](t, command.run("latest refresh", "pull", bundleRef, latest, "--mode", "latest", "--format", "json"))
+	pulled := decode[bale.PullResult](t, command.run("latest refresh", "pull", "--layout", bundleRef, latest, "--mode", "latest", "--format", "json"))
 	if pulled.Descriptor.Digest == created.Descriptor.Digest {
 		t.Fatal("latest pull did not refresh moved dependency")
 	}
@@ -434,7 +434,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	phase.Store("offline preview")
 	beforeRequests := requests.Load()
 	previewStarted := time.Now().UTC()
-	plan := decode[bale.DeliveryPlan](t, command.run("offline preview", "push", latest, completion, "--delivery", newFile, "--dry-run", "--format", "json"))
+	plan := decode[bale.DeliveryPlan](t, command.run("offline preview", "push", "--layout", latest, completion, "--delivery", newFile, "--dry-run", "--format", "json"))
 	if requests.Load() != beforeRequests {
 		requestMu.Lock()
 		entries := append([]string(nil), requestLog...)
@@ -453,7 +453,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	}
 	phase.Store("destination restart and publication")
 	destination.restart(t, ctx)
-	result := decode[bale.PushResult](t, command.run("offline delivery", "push", latest, completion, "--delivery", newFile, "--format", "json"))
+	result := decode[bale.PushResult](t, command.run("offline delivery", "push", "--layout", latest, completion, "--delivery", newFile, "--format", "json"))
 	if result.Descriptor.Digest != plan.Descriptor.Digest {
 		t.Fatalf("actual bundle digest %s disagrees with preview %s", result.Descriptor.Digest, plan.Descriptor.Digest)
 	}
@@ -533,7 +533,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	phase.Store("publication failure, retry and conflict checks")
 	runPublicationChecks(t, ctx, client, command, publication, latest, newFile, destinationHost, subject, refreshed)
 	finalLayout := filepath.Join(dir, "destination-only")
-	command.run("destination-only locked pull", "pull", completion, finalLayout)
+	command.run("destination-only locked pull", "pull", "--layout", completion, finalLayout)
 	final := decode[[]bale.InspectResult](t, command.run("destination-only inspect", "inspect", "--layout", finalLayout))
 	if len(final) != 1 || final[0].Descriptor.Digest != pulled.Descriptor.Digest {
 		t.Fatal("final pull changed bundle digest")

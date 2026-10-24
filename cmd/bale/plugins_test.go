@@ -266,7 +266,7 @@ func TestOCIPluginCLI(t *testing.T) {
 		t.Fatalf("automatic discovery wrote %d times to subject repository", sourceWrites)
 	}
 	layout := filepath.Join(t.TempDir(), "locked")
-	invoke("pull", bundleRef, layout, "-q")
+	invoke("pull", "--layout", bundleRef, layout, "-q")
 	algorithm, encoded, _ := strings.Cut(packageLayer.Digest.String(), ":")
 	capturedPackage, err := os.ReadFile(filepath.Join(layout, "blobs", algorithm, encoded))
 	if err != nil || !bytes.Equal(capturedPackage, packageBytes) {
@@ -274,13 +274,13 @@ func TestOCIPluginCLI(t *testing.T) {
 	}
 	latest := filepath.Join(t.TempDir(), "latest")
 	var out, errs bytes.Buffer
-	if code := run([]string{"pull", bundleRef, latest, "--mode=latest", "--plain-http", host, "-q"}, &out, &errs); code != 125 || !strings.Contains(errs.String(), "plugin") || out.Len() != 0 {
+	if code := run([]string{"pull", "--layout", bundleRef, latest, "--mode=latest", "--plain-http", host, "-q"}, &out, &errs); code != 125 || !strings.Contains(errs.String(), "plugin") || out.Len() != 0 {
 		t.Fatalf("latest execution permission: %d %s %s", code, &out, &errs)
 	}
 	if _, err := os.Stat(latest); !os.IsNotExist(err) {
 		t.Fatalf("denied latest mutated layout: %v", err)
 	}
-	invoke("pull", bundleRef, latest, "--mode=latest", "--allow-plugins", "--plugin-cache=", "-q")
+	invoke("pull", "--layout", bundleRef, latest, "--mode=latest", "--allow-plugins", "--plugin-cache=", "-q")
 }
 
 func TestPluginCLIValidation(t *testing.T) {
@@ -299,7 +299,7 @@ func TestPluginCLIValidation(t *testing.T) {
 		{"plugins", "push", "-f", "none", "example.com/plugin@sha256:" + strings.Repeat("a", 64)},
 		{"plugins", "push", "-f", "none", "example.com/plugin:tag", "--format", "{{"},
 		{"dependencies", "generate", "--plugin", "example.com/plugin:v1", "--plugin-file", "local", "--input", "none"},
-		{"pull", "example.com/bundle:v1", "layout", "--allow-plugins"},
+		{"pull", "--layout", "example.com/bundle:v1", "layout", "--allow-plugins"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 125 || out.Len() != 0 || !strings.HasPrefix(errs.String(), "Error: ") {

@@ -115,8 +115,8 @@ func TestArchiveCLIIsLocal(t *testing.T) {
 	dir := t.TempDir()
 	archive, restored := filepath.Join(dir, "release.tar"), filepath.Join(dir, "restored")
 	for _, args := range [][]string{
-		{"save", layout, "-o", archive, "--format", "json"},
-		{"load", "-i", archive, restored, "--format", "json"},
+		{"save", "--layout", layout, "-o", archive, "--format", "json"},
+		{"load", "--layout", "-i", archive, restored, "--format", "json"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
@@ -136,8 +136,8 @@ func TestArchiveCLIIsLocal(t *testing.T) {
 		t.Fatalf("archive changed captured inventory: %+v %v", comparison, err)
 	}
 	for _, args := range [][]string{
-		{"save", layout, "-o", archive},
-		{"load", "-i", archive, restored},
+		{"save", "--layout", layout, "-o", archive},
+		{"load", "--layout", "-i", archive, restored},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "already exists") {
@@ -145,18 +145,18 @@ func TestArchiveCLIIsLocal(t *testing.T) {
 		}
 	}
 	var out, errs bytes.Buffer
-	if code := run([]string{"save", restored, "-o", filepath.Join(dir, "second.tar")}, &out, &errs); code != 0 || out.String() != root.Digest.String()+"\n" {
+	if code := run([]string{"save", "--layout", restored, "-o", filepath.Join(dir, "second.tar")}, &out, &errs); code != 0 || out.String() != root.Digest.String()+"\n" {
 		t.Fatalf("default save output: exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 }
 
 func TestArchiveCommandValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"save"}, {"save", "layout"}, {"save", "layout", "-o", ""},
-		{"save", "layout", "-o", "out", "--output", "other"},
-		{"load"}, {"load", "layout"}, {"load", "-i", "", "layout"},
-		{"load", "-i", "archive", "one", "two"},
-		{"load", "-i", "archive", "layout", "--plain-http", "localhost:5000"},
+		{"save"}, {"save", "--layout", "layout"}, {"save", "--layout", "layout", "-o", ""},
+		{"save", "--layout", "layout", "-o", "out", "--output", "other"},
+		{"load"}, {"load", "--layout", "layout"}, {"load", "--layout", "-i", "", "layout"},
+		{"load", "--layout", "-i", "archive", "one", "two"},
+		{"load", "--layout", "-i", "archive", "layout", "--plain-http", "localhost:5000"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 125 || out.Len() != 0 || !strings.HasPrefix(errs.String(), "Error:") {
@@ -229,7 +229,8 @@ func TestMetadataCreateDefersPayloadsUntilSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	recipe, capture := filepath.Join(dir, "bale.yaml"), filepath.Join(dir, "capture")
+	recipe, capture := filepath.Join(dir, "bale.yaml"), "capture:v1"
+	storePath := filepath.Join(dir, "store")
 	data := fmt.Sprintf("include:\n  - ref: %s/app:stable\n    dependencies:\n      follow: none\n    referrers:\n      include: none\n", host)
 	if err := os.WriteFile(recipe, []byte(data), 0600); err != nil {
 		t.Fatal(err)
@@ -237,28 +238,27 @@ func TestMetadataCreateDefersPayloadsUntilSave(t *testing.T) {
 	invoke := func(args ...string) []byte {
 		t.Helper()
 		var out, errs bytes.Buffer
-		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+		if code := run(append(args, "--store", storePath), &out, &errs); code != 0 || errs.Len() != 0 {
 			t.Fatalf("%v: exit %d stdout %s stderr %s", args, code, &out, &errs)
 		}
 		return out.Bytes()
 	}
-	dryPath := filepath.Join(dir, "preview")
-	preview := invoke("create", "-f", recipe, dryPath, "--dry-run", "--plain-http", host, "--quiet")
+	preview := invoke("create", "-f", recipe, "--dry-run", "--plain-http", host, "--quiet")
 	if !strings.Contains(string(preview), "payloads remain at pinned sources") {
 		t.Fatalf("create preview hid source dependence: %s", preview)
 	}
-	if _, err := os.Stat(dryPath); !os.IsNotExist(err) {
-		t.Fatalf("create preview wrote a local capture: %v", err)
+	if listing := invoke("ls", "--format=json"); strings.TrimSpace(string(listing)) != "[]" {
+		t.Fatalf("preview retained a bundle: %s", listing)
 	}
-	createdJSON := invoke("create", "-f", recipe, capture, "--plain-http", host, "--format=json", "--quiet")
+	createdJSON := invoke("create", "-f", recipe, "-t", capture, "--plain-http", host, "--format=json", "--quiet")
 	var created bale.CreateResult
-	if err := json.Unmarshal(createdJSON, &created); err != nil || !created.MetadataOnly || created.Published || created.LayoutPath != capture {
+	if err := json.Unmarshal(createdJSON, &created); err != nil || !created.MetadataOnly || created.Published || created.LayoutPath != "" {
 		t.Fatalf("metadata create %s: %v", createdJSON, err)
 	}
 	if payloadReads.Load() != 0 || mutations.Load() != 0 {
 		t.Fatalf("creation transferred payloads or wrote sources: payloads=%d mutations=%d", payloadReads.Load(), mutations.Load())
 	}
-	if _, err := os.Stat(filepath.Join(capture, "blobs", payload.Digest.Algorithm().String(), payload.Digest.Encoded())); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(storePath, "blobs", payload.Digest.Algorithm().String(), payload.Digest.Encoded())); !os.IsNotExist(err) {
 		t.Fatalf("metadata capture retained an opaque payload: %v", err)
 	}
 	// Neither local inspection nor planning may consult sources or credentials.
@@ -266,7 +266,7 @@ func TestMetadataCreateDefersPayloadsUntilSave(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("invalid credentials JSON"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	inspectedJSON := invoke("inspect", "--layout", capture)
+	inspectedJSON := invoke("inspect", capture)
 	var inspected []bale.InspectResult
 	if err := json.Unmarshal(inspectedJSON, &inspected); err != nil || len(inspected) != 1 || !inspected[0].MetadataOnly || inspected[0].Descriptor.Digest != created.Descriptor.Digest {
 		t.Fatalf("metadata inspection %s: %v", inspectedJSON, err)
@@ -288,10 +288,27 @@ func TestMetadataCreateDefersPayloadsUntilSave(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("invalid credentials JSON"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	restored := filepath.Join(dir, "restored")
-	invoke("load", "-i", archive, restored, "--quiet")
-	result, err := client.InspectLayout(t.Context(), restored)
+	invoke("load", "-i", archive, "-t", "restored:v1", "--quiet")
+	local, err := openManaged(t.Context(), commandOptions{storePath: storePath}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := local.Inspect(t.Context(), "restored:v1")
 	if err != nil || result.MetadataOnly || result.Descriptor.Digest != created.Descriptor.Digest {
 		t.Fatalf("saved capture is not a complete pinned offline bundle: %+v %v", result, err)
 	}
+	invoke("tag", capture, "approved:v1")
+	invoke("inspect", "approved:v1")
+	var selected, selectedErrors bytes.Buffer
+	if code := run([]string{"--store", storePath, "inspect", "--", "approved:v1"}, &selected, &selectedErrors); code != 0 || !strings.Contains(selected.String(), created.Descriptor.Digest.String()) {
+		t.Fatalf("global store after terminator: code=%d output=%s error=%s", code, &selected, &selectedErrors)
+	}
+	invoke("rm", capture)
+	invoke("inspect", created.Descriptor.Digest.String())
+	invoke("rm", created.Descriptor.Digest.String())
+	if listing := invoke("ls", "--format=json"); strings.TrimSpace(string(listing)) != "[]" {
+		t.Fatalf("removed root retained: %s", listing)
+	}
+	invoke("prune", "--dry-run")
+
 }

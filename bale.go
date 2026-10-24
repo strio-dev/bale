@@ -11,6 +11,7 @@ import (
 	"github.com/strio-dev/bale/internal/dependency"
 	"github.com/strio-dev/bale/internal/destination"
 	"github.com/strio-dev/bale/internal/transport"
+	"oras.land/oras-go/v2/content"
 )
 
 // Client transports immutable OCI graphs and Bale bundles. Authentication,
@@ -55,6 +56,7 @@ type (
 	Stats                        = transport.Stats
 	CreateOptions                = transport.CreateOptions
 	CreateResult                 = transport.CreateResult
+	CaptureState                 = transport.CaptureState
 	ArchiveResult                = transport.ArchiveResult
 	PullMode                     = transport.PullMode
 	PullResult                   = transport.PullResult
@@ -241,6 +243,29 @@ func (c *Client) CreateLocal(ctx context.Context, recipe Recipe, path string, op
 		return CreateResult{}, err
 	}
 	return c.service.CreateLocal(ctx, normalized, path, options)
+}
+
+// CreateInto locks a recipe into caller-owned OCI storage without fetching
+// ordinary payloads. The caller publishes its own root references only after
+// success and retains the returned local source state for missing payloads.
+func (c *Client) CreateInto(ctx context.Context, recipe Recipe, target content.Storage, options CreateOptions) (CreateResult, *CaptureState, error) {
+	normalized, err := NormalizeRecipe(recipe)
+	if err != nil {
+		return CreateResult{}, nil, err
+	}
+	return c.service.CreateInto(ctx, normalized, target, options)
+}
+
+// PullInto downloads a registry bundle into caller-owned OCI storage. Existing
+// blobs are reused, and the complete graph is verified before success.
+func (c *Client) PullInto(ctx context.Context, reference string, target content.Storage, mode PullMode, options PullOptions) (PullResult, error) {
+	return c.service.PullInto(ctx, reference, target, mode, options)
+}
+
+// MaterializeInto completes a pinned local capture in caller-owned OCI storage.
+// Missing payloads use only the captured sources; tags and plugins are unchanged.
+func (c *Client) MaterializeInto(ctx context.Context, root Root, state *CaptureState, target content.Storage) (PullResult, error) {
+	return c.service.MaterializeInto(ctx, root, state, target)
 }
 
 // Save writes a verified bundle to a new, deterministic OCI tar archive.

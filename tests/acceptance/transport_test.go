@@ -68,7 +68,7 @@ func TestRegistryTransportAcceptance(t *testing.T) {
 			writeFile(t, recipe, []byte("include:\n  - ref: "+subject.Repository+":stable\n"))
 			// Fixture creation is local HTTP; every transport assertion below uses
 			// HTTPS without --plain-http or an insecure verification override.
-			command := cli{t: t, ctx: ctx, binary: paths[0], env: []string{"DOCKER_CONFIG=" + configDir}, hosts: []string{registry.host}}
+			command := cli{t: t, ctx: ctx, binary: paths[0], env: []string{"DOCKER_CONFIG=" + configDir, "XDG_DATA_HOME=" + filepath.Join(dir, "data")}, hosts: []string{registry.host}}
 			created := decode[bale.CreateResult](t, command.run("transport fixture", "create", "--registry", registry.host+"/bundles:transport", "--file", recipe, "--format", "json"))
 			upstream, err := url.Parse("http://" + registry.host)
 			if err != nil {
@@ -111,9 +111,9 @@ func TestRegistryTransportAcceptance(t *testing.T) {
 				writeFile(t, filepath.Join(configDir, "config.json"), raw)
 				commandCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 				defer cancel()
-				command := exec.CommandContext(commandCtx, paths[0], "pull", host+"/bundles:transport", filepath.Join(dir, name), "--format", "json")
+				command := exec.CommandContext(commandCtx, paths[0], "pull", "--layout", host+"/bundles:transport", filepath.Join(dir, name), "--format", "json")
 				// Isolate credentials, proxy settings and trust inputs from the host.
-				command.Env = []string{"DOCKER_CONFIG=" + configDir, "SSL_CERT_DIR=" + emptyCertDir}
+				command.Env = []string{"DOCKER_CONFIG=" + configDir, "SSL_CERT_DIR=" + emptyCertDir, "XDG_DATA_HOME=" + filepath.Join(dir, "data")}
 				if trust {
 					command.Env = append(command.Env, "SSL_CERT_FILE="+ca)
 				} else {

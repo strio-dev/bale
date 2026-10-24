@@ -16,15 +16,15 @@ A [delivery file](../transfers.md#export-delivery-paths) changes member paths at
 
 ## Three ways to carry the same content
 
-- **Local capture:** default creation keeps manifests and interpreted metadata locally. Payloads remain at their pinned source locations until push or save; discovery may still read charts and plugin packages.
+- **Local store:** default creation retains manifests and interpreted metadata under a bundle ID, with optional local names. Missing payloads are read from their pinned source locations during push or save; discovery may still read charts and plugin packages.
 - **Registry:** `create --registry` stores the bundle and its complete graph in one holding repository.
-- **Offline copy:** `create --layout` downloads a complete OCI layout. `save` downloads any missing content into a complete archive; `load` restores it without source access.
+- **Offline copy:** `save` downloads missing content into the shared store and writes a complete archive; `load` imports it without source access. Explicit `--layout` operations support standalone OCI directories.
 
-Save, load and locked transfers preserve the bundle digest. Complete layouts and archives store shared content once by digest; registry deduplication depends on storage and repository scope. A registry bundle holds the required content itself, so later pulls can work without the original sources. Its [retention policy](../registry.md#retention-and-garbage-collection) must preserve the graph.
+Save, load and locked transfers preserve the bundle digest. The local store and archives retain shared content once by digest; registry deduplication depends on storage and repository scope. A registry bundle holds the required content itself, so later pulls can work without the original sources. Its [retention policy](../registry.md#retention-and-garbage-collection) must preserve the graph.
 
 ## Locked and latest
 
-`pull` defaults to **locked**: retrieve the captured graph without resolving source tags or running plugins.
+`pull` defaults to **locked**: retrieve the captured graph into the local store without resolving source tags or running plugins.
 
 `pull --mode latest` uses the recipe to capture a fresh snapshot from the sources. Add `--allow-plugins` if that recipe uses discovery plugins. [Compare snapshots](../inspection.md#compare-snapshots) and [update delivery paths](../delivery-updates.md) before delivering the refresh.
 

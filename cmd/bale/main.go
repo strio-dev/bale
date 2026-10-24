@@ -25,21 +25,27 @@ Usage:
   bale [command]
 
 Available Commands:
-  create        Resolve a recipe into a local metadata capture
+  create        Resolve a recipe into the managed local store
   delivery      Update delivery paths for a refreshed bundle
   dependencies  Generate, attach, list, and inspect dependency declarations
   destinations  Inspect delivered artifact destination records
   diff          Compare captured bundle snapshots
   inspect       Inspect captured bundle content
-  load          Restore an OCI bundle archive into a local layout
+  load          Import an OCI bundle archive into the local store
+  ls            List stored bundles
+  info          Show the local store location
+  tag           Add names to a stored bundle
+  rm            Remove stored bundle names or IDs
+  prune         Remove unreferenced local content
   plugins       Publish portable discovery plugins
-  pull          Pull a bundle into a local OCI layout
+  pull          Pull a bundle into the local store
   push          Push a local bundle to a registry
   save          Save a local bundle as an OCI archive
   version       Display version information
   help          Help about a command
 
 Options:
+      --store PATH  Override the managed local store
   -h, --help       Help for bale
   -v, --version    Display version information
 
@@ -51,13 +57,13 @@ func (v *stringsFlag) String() string     { return strings.Join(*v, ",") }
 func (v *stringsFlag) Set(s string) error { *v = append(*v, s); return nil }
 
 type commandOptions struct {
-	file, mode, format                     string
+	file, mode, format, storePath          string
 	outputDelivery, delivery               string
 	archiveInput, archiveOutput            string
 	dryRun, help                           bool
 	formatSet                              bool
 	layout, registry, quiet                bool
-	plainHTTP, maps                        stringsFlag
+	plainHTTP, maps, tags                  stringsFlag
 	args                                   []string
 	pluginModule, pluginInput, pluginCache string
 	pluginRef                              string
@@ -74,13 +80,29 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&opts.help, "help", false, "help")
 	fs.BoolVar(&opts.help, "h", false, "help")
-	allowed := map[string]bool{"help": false, "h": false}
+	allowed := map[string]bool{"help": false, "h": false, "store": true}
+	fs.StringVar(&opts.storePath, "store", "", "managed local store directory")
 	if command != "load" {
 		fs.Var(&opts.plainHTTP, "plain-http", "registry allowed to use HTTP")
 		allowed["plain-http"] = true
 	}
 	aliases := map[string]string{"h": "help"}
 	repeated := map[string]bool{"plain-http": true}
+	if command == "create" || command == "pull" || command == "load" {
+		fs.Var(&opts.tags, "tag", "local bundle name")
+		fs.Var(&opts.tags, "t", "local bundle name")
+		allowed["tag"], allowed["t"] = true, true
+		aliases["t"] = "tag"
+		repeated["tag"] = true
+	}
+	if command == "inspect" || command == "diff" || command == "delivery update" {
+		fs.BoolVar(&opts.registry, "registry", false, "use registry references")
+		allowed["registry"] = false
+	}
+	if command == "pull" || command == "push" || command == "save" || command == "load" {
+		fs.BoolVar(&opts.layout, "layout", false, "use an explicit OCI layout path")
+		allowed["layout"] = false
+	}
 	if command != "version" && command != "dependencies generate" {
 		fs.StringVar(&opts.format, "format", "", "output format")
 		allowed["format"] = true
@@ -154,6 +176,10 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 		allowed["dry-run"] = false
 		allowed["delivery"] = true
 		allowed["map"], repeated["map"] = true, true
+	case "prune":
+		fs.BoolVar(&opts.dryRun, "dry-run", false, "preview unreferenced content removal")
+		allowed["dry-run"] = false
+	case "ls", "tag", "rm", "info":
 	case "version":
 	case "dependencies generate":
 	default:
@@ -218,6 +244,12 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 	}
 	if opts.layout && opts.registry {
 		return opts, fmt.Errorf("--layout and --registry cannot be combined")
+	}
+	if seen["store"] && opts.storePath == "" {
+		return opts, fmt.Errorf("--store requires a nonempty path")
+	}
+	if len(opts.tags) > 0 && (opts.layout || opts.registry) {
+		return opts, fmt.Errorf("--tag is for managed local bundles; it cannot be combined with --layout or --registry")
 	}
 	if seen["output-delivery"] && opts.outputDelivery == "" {
 		return opts, fmt.Errorf("--output-delivery requires a nonempty path")
@@ -301,6 +333,31 @@ func run(args []string, out, errOut io.Writer) int {
 }
 
 func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
+	var global []string
+	for len(args) > 0 && (args[0] == "--store" || strings.HasPrefix(args[0], "--store=")) {
+		if args[0] == "--store" {
+			if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+				return fail(errOut, fmt.Errorf("--store requires a value"))
+			}
+			global = append(global, "--store="+args[1])
+			args = args[2:]
+		} else {
+			global = append(global, args[0])
+			args = args[1:]
+		}
+	}
+	if len(args) > 0 && args[0] != "help" && args[0] != "--help" && args[0] != "-h" && args[0] != "--version" && args[0] != "-v" && args[0] != "version" {
+		position := len(args)
+		for i, arg := range args {
+			if arg == "--" {
+				position = i
+				break
+			}
+		}
+		prefix := append([]string{}, args[:position]...)
+		prefix = append(prefix, global...)
+		args = append(prefix, args[position:]...)
+	}
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "help" || args[0] == "--help" || args[0] == "-h")) {
 		if _, err := fmt.Fprintln(out, help); err != nil {
 			return fail(errOut, err)
@@ -352,6 +409,9 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if err := validateHTTP(opts.plainHTTP); err != nil {
 		return fail(errOut, err)
+	}
+	if managedCommand(args[0], opts) {
+		return runManaged(ctx, args[0], opts, out, errOut)
 	}
 	if args[0] == "save" || args[0] == "load" {
 		return runArchive(ctx, args[0], opts, out, errOut)
@@ -449,8 +509,8 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 		service, err = bale.NewClient(bale.ClientOptions{})
 	} else {
 		clientOpts := opts
-		if command == "create" {
-			// Local output still captures authenticated registry sources.
+		if command == "create" || command == "pull" {
+			// Explicit local outputs still read authenticated registry sources.
 			clientOpts.layout = false
 		}
 		service, err = newCLIClient(clientOpts, progress)

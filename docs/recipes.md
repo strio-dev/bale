@@ -26,7 +26,7 @@ include:
 | `dependencies` | Declaration-following policy; defaults to `follow: auto`. |
 | `plugin` | Optional OCI discovery plugin and its input. |
 
-Creation pins the complete graph, including multiarchitecture images. Default local capture retains metadata; `save` or `push` reads missing payloads from those pinned sources. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Recipes contain exactly one YAML document. Unknown and duplicate fields, aliases, anchors and YAML merge keys are rejected. Outside `plugin.input`, scalar values must be nonempty strings without surrounding whitespace; quote numeric-looking tags as shown above.
+Creation pins the complete graph, including multiarchitecture images. Default creation retains metadata in the managed local store; `save` or `push` reads missing payloads from those pinned sources. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Recipes contain exactly one YAML document. Unknown and duplicate fields, aliases, anchors and YAML merge keys are rejected. Outside `plugin.input`, scalar values must be nonempty strings without surrounding whitespace; quote numeric-looking tags as shown above.
 
 ## Discover dependencies with a plugin
 

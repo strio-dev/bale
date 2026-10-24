@@ -20,6 +20,7 @@ let
     "cmd"
     "internal"
     "plugin"
+    "store"
     "tests"
   ]
   ++ builtins.tail modules;

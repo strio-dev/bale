@@ -163,7 +163,7 @@ func TestLocalCaptureRejectsChangedLocatorsAndInvalidMetadata(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var state localCapture
+			var state CaptureState
 			if err := json.Unmarshal(raw, &state); err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +185,7 @@ func TestLocalCaptureRejectsChangedLocatorsAndInvalidMetadata(t *testing.T) {
 				case "unreachable digest":
 					state.Sources[digest.FromString("unreachable")] = repo
 				case "unreachable repository":
-					var original localCapture
+					var original CaptureState
 					_ = json.Unmarshal(raw, &original)
 					for dgst := range original.Sources {
 						state.Sources[dgst] = "unrelated.example/repo"
@@ -439,11 +439,11 @@ func TestCreateLocalRetainsSharedInlinePayloadInEitherTraversalOrder(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			var state localCapture
+			var state CaptureState
 			if err := json.Unmarshal(raw, &state); err != nil {
 				t.Fatal(err)
 			}
-			if err := validateLocalCapture(ctx, store, snapshot, state); err == nil {
+			if err := ValidateCaptureState(ctx, store, snapshot, state); err == nil {
 				t.Fatal("inline edge waived missing non-inline payload locator")
 			}
 		})

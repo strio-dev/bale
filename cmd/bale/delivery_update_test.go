@@ -292,8 +292,8 @@ func TestDeliveryUpdateOptionsAndHelp(t *testing.T) {
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "--file", "other", "-o", "out"}, "duplicate option"},
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "-o", "out", "--output", "other"}, "duplicate option"},
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "-o", "out", "--format", "{{"}, "invalid --format"},
-		{[]string{"delivery", "update", "team/b:tag", "example.invalid/b:tag", "-f", "file", "-o", "out"}, "explicit registry"},
-		{[]string{"delivery", "update", "example.invalid/b:tag", "example.invalid/b", "-f", "file", "-o", "out"}, "explicit tag"},
+		{[]string{"delivery", "update", "--registry", "team/b:tag", "example.invalid/b:tag", "-f", "file", "-o", "out"}, "explicit registry"},
+		{[]string{"delivery", "update", "--registry", "example.invalid/b:tag", "example.invalid/b", "-f", "file", "-o", "out"}, "explicit tag"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(tc.args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), tc.want) {

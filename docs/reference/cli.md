@@ -6,8 +6,8 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 
 | Command | Purpose |
 | --- | --- |
-| `create` | Lock recipe metadata locally; use `--registry` for registry storage or `--layout` for a complete offline directory. |
-| `pull` / `push` | Retrieve a captured bundle or deliver a local layout. |
+| `create` | Lock recipe metadata in the local store; optionally name it with `-t`. |
+| `pull` / `push` | Download a bundle into the store or deliver a stored bundle. |
 | `save` / `load` | Write or restore an offline OCI archive. |
 | `inspect` / `diff` | Read inventory or compare two snapshots. |
 | `delivery update` | Carry edited paths forward to a refreshed snapshot. |
@@ -15,7 +15,13 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 | `dependencies list` / `inspect` | Read declaration descriptors or payloads. |
 | `destinations inspect` | Read delivered dependency mappings for an artifact. |
 | `plugins push` | Publish a discovery plugin `.tgz` package as an OCI artifact. |
+| `ls` / `info` | List retained local bundles or show store information. |
+| `tag` / `rm` / `prune` | Manage local names and retained bundles, or reclaim unreferenced content. |
 | `version` | Print the CLI version. |
+
+Bundle operands default to local names or IDs. `inspect`, `diff` and `delivery update` require `--registry` for remote references. `create`, `pull` and `load` accept repeatable `--tag/-t` names and print the retained bundle digest. Creation and loading need no positional output path; pull takes only its registry reference.
+
+The default store is `$XDG_DATA_HOME/bale`, or `~/.local/share/bale` when `XDG_DATA_HOME` is unset. Global `--store PATH` selects another store and may appear before or after the command. Shared blobs are stored once by digest. `rm` removes retained references; `prune` explicitly reclaims unreferenced content.
 
 `-f` means `--file` for creation and authoring commands, and `--format` for inspection and comparison. Repeat `--plain-http` and `--map` when needed; duplicate single-value options are rejected.
 
@@ -32,8 +38,8 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 Transfers write progress to stderr; `--quiet` suppresses it. Commands offering `--format` accept `json` or a Go template. Templates run once per item for inspection arrays and once against the result for other commands:
 
 ```sh
-bale inspect --layout ./release -f '{{.Descriptor.Digest}}'
-bale inspect --layout ./release --format json
+bale inspect release:v1 -f '{{.Descriptor.Digest}}'
+bale inspect release:v1 --format json
 ```
 
 Template helpers are `json`, `join`, `split`, `lower` and `upper`. Missing keys are errors; output is buffered so a failed template does not print a partial result.
@@ -44,13 +50,13 @@ On failed `create`, `pull` or `push`, explicit JSON output can retain a result d
 
 ## Validation and previews
 
-Default creation writes a source-dependent metadata capture. `create --layout` downloads a complete local layout; `create --registry` stores the complete graph in the supplied registry repository. These options are mutually exclusive.
+Default creation retains a source-dependent metadata capture in the managed store. `create --layout` downloads a complete local layout; `create --registry` stores the complete graph in the supplied registry repository. These options are mutually exclusive. With `--layout`, create/pull/load require an explicit output directory, and inspect/diff/delivery update/push/save take standalone layout paths instead of local store names.
 
 Local inspection, delivery export and push preview verify metadata captures without source access. Inspection reports and JSON push plans identify them with `metadataOnly: true`. Complete layouts also receive full payload validation. Diff, delivery update and registry delivery-file export read verified metadata without checking opaque payload availability. Destination inspection validates its attached metadata without following recorded locations.
 
 `create --dry-run` resolves source content and runs configured discovery plugins without retaining a capture. With `--registry`, it also reads the holding registry to check tag conflicts. Local creation needs no writable registry. `push --dry-run` validates local content and computes paths without registry access; it does not check missing source payloads, destination credentials, availability or tag conflicts.
 
-Push reads missing payloads from a metadata capture's pinned sources, reusing destination blobs or registry mounts when possible. Save downloads missing payloads into a complete offline archive. Neither operation refreshes tags or runs plugins. Save from a complete layout and load remain offline.
+Push reads missing payloads from a metadata capture's pinned sources, reusing destination blobs or registry mounts when possible. Save hydrates missing payloads into the shared store and exports a complete offline archive. Neither operation refreshes tags or runs plugins. Save from a complete stored bundle and load remain offline.
 
 ## Credentials and transport
 

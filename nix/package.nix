@@ -18,6 +18,7 @@
       ))
       ../internal
       ../plugin
+      ../store
       ../tests
       ../go.mod
       ../go.sum

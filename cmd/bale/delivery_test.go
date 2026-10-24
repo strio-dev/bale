@@ -88,13 +88,13 @@ func TestDeliveryCLIValidationBeforeStorage(t *testing.T) {
 		want string
 	}{
 		{[]string{"inspect", "--layout", "missing", "--output-delivery="}, "nonempty path"},
-		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery="}, "nonempty path"},
+		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery="}, "nonempty path"},
 		{[]string{"inspect", "--layout", "missing", "other", "--output-delivery", "ignored.yaml"}, "requires one bundle"},
 		{[]string{"inspect", "--layout", "missing", "--output-delivery", "ignored.yaml", "--format", "json"}, "cannot be combined"},
 		{[]string{"create", "--registry", "-f", existing, "unreachable.invalid/b:tag", "--output-delivery", existing}, "already exists"},
 		{[]string{"inspect", "--layout", "missing", "--output-delivery", existing}, "already exists"},
-		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery", malformed}, "unknown"},
-		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery", "missing-delivery-file"}, "no such file"},
+		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery", malformed}, "unknown"},
+		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery", "missing-delivery-file"}, "no such file"},
 		{[]string{"inspect", "--layout", "missing", "--output-delivery", filepath.Join(t.TempDir(), "absent", "file.yaml")}, "no such file"},
 	} {
 		var out, errs bytes.Buffer
@@ -204,7 +204,7 @@ func TestPushRejectsStaleDeliveryBeforePublication(t *testing.T) {
 	defer server.Close()
 	host := strings.TrimPrefix(server.URL, "http://")
 	var out, errs bytes.Buffer
-	if code := run([]string{"push", dir, host + "/release:bundle", "--plain-http", host, "--delivery", input}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "bundle") {
+	if code := run([]string{"push", "--layout", dir, host + "/release:bundle", "--plain-http", host, "--delivery", input}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "bundle") {
 		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	if requests.Load() != 0 {

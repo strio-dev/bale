@@ -23,7 +23,7 @@ include:
 ```
 
 ```sh
-bale create -f bale.yaml ./release
+bale create -f bale.yaml -t release:v1
 ```
 
 Replace the chart and plugin references. Each needs an explicit registry and tag or digest; pin the plugin digest to keep its code fixed across new captures.
@@ -41,7 +41,7 @@ Creation reads the plugin and its bound inputs, runs discovery and resolves the 
 Locked pull, inspection and push use the capture. To rerun discovery while refreshing tags, authorize plugins explicitly:
 
 ```sh
-bale pull registry.example.com/bundles/release:v1 ./refreshed --mode latest --allow-plugins
+bale pull registry.example.com/bundles/release:v1 -t release:refreshed --mode latest --allow-plugins
 ```
 
 ## Publish a plugin

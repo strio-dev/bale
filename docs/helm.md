@@ -107,15 +107,15 @@ helm bale --context production upgrade web \
   oci://mirror.example.com/release/charts/web:1.4 --install --namespace production
 ```
 
-See the [consumer reference](reference/helm-consumer.md#select-a-capture) for all selectors and validation rules.
+See the [consumer reference](reference/helm-discovery.md#select-a-capture) for all selectors and validation rules.
 
 ### Image inventory
 
-The renderer relocates supported workloads and hooks, leaving valid unmapped images unchanged. See [supported images and limits](reference/helm-consumer.md#supported-images-and-limits).
+The renderer relocates supported workloads and hooks, leaving valid unmapped images unchanged. See [supported images and limits](reference/helm-discovery.md#supported-images-and-limits).
 
 ### Offline filter
 
-To relocate an already-rendered stream without registry access, use the [offline filter](reference/helm-consumer.md#filter-an-existing-stream).
+To relocate an already-rendered stream without registry access, use the [offline filter](reference/helm-discovery.md#filter-an-existing-stream).
 
 ## Reuse after transfer
 

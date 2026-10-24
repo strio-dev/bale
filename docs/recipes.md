@@ -1,4 +1,4 @@
-# Recipes
+# Recipe syntax
 
 A recipe selects what to capture. Write it in YAML; Bale stores the normalized recipe and captured inventory as JSON. Delivery paths belong in a separate [delivery file](transfers.md#export-delivery-paths), so choosing a destination does not require capturing again.
 

@@ -29,7 +29,7 @@ bale diff --layout ./locked ./refreshed --format json
 bale diff --layout ./locked ./refreshed -f '{{.Changed}}'
 ```
 
-A successful comparison exits 0 even when bundles differ. See [comparison rules](reference/transfers.md#inspection-and-comparison) for mutable tags, nested inventories and artifact identity.
+A successful comparison exits 0 even when bundles differ. See [comparison rules](reference/cli.md#inspection-and-comparison) for mutable tags, nested inventories and artifact identity.
 
 ## Export delivery YAML
 

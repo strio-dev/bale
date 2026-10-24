@@ -31,7 +31,7 @@ The new file binds to the refreshed bundle and lists every artifact:
 - Unambiguous input, dependency and plugin selectors can carry paths to changed digests.
 - New or unmatched artifacts receive defaults; removed artifacts are reported.
 
-Nested inventories participate too. Every old row is an explicit path choice. `push --map` settings are separate and are not carried forward. See [matching rules](reference/transfers.md#matching-delivery-paths) for aliases and ambiguous selectors.
+Nested inventories participate too. Every old row is an explicit path choice. `push --map` settings are separate and are not carried forward. See [matching rules](reference/cli.md#matching-delivery-paths) for aliases and ambiguous selectors.
 
 ## Resolve conflicts
 
@@ -46,4 +46,4 @@ bale delivery update --layout ./locked ./refreshed \
   -f bale.delivery.yaml -o refreshed.report.delivery.yaml --format json
 ```
 
-Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate the full graph. [Report fields and exit status](reference/transfers.md#update-reports) are listed in the reference.
+Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate the full graph. [Report fields and exit status](reference/cli.md#update-reports) are listed in the reference.

@@ -14,7 +14,7 @@ The [SDK](sdk.md#configure-a-client) defaults to anonymous access; callers suppl
 
 Bale follows OCI descriptors, selected referrers and [dependency declarations](dependencies.md). It preserves artifact bytes and publishes children before the bundle's completion tag.
 
-Objects with a subject reserve the standard referrer fallback tag (`<algorithm>-<subject digest>`), including on registries with native referrers. Conflicting aliases or completion tags fail rather than replacing that inventory. See [publication behavior](reference/transfers.md#publication) for graph traversal, managed tags and concurrent publishers.
+Objects with a subject reserve the standard referrer fallback tag (`<algorithm>-<subject digest>`), including on registries with native referrers. Conflicting aliases or completion tags fail rather than replacing that inventory. See [publication behavior](reference/cli.md#publication) for graph traversal, managed tags and concurrent publishers.
 
 ## Retention and garbage collection
 

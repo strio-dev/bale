@@ -43,7 +43,7 @@ artifacts:
 
 Edit only `path` values. For example, `images/web` under `mirror.example.com/releases/v1:bundle` publishes to `mirror.example.com/releases/v1/images/web`.
 
-Omitted rows remain included with default mapping. Bale may make additional copies to keep related OCI content together. Paths control publication locations; they leave chart and application content unchanged. See [delivery file rules](reference/transfers.md#delivery-files) for identity, validation and mapping precedence.
+Omitted rows remain included with default mapping. Bale may make additional copies to keep related OCI content together. Paths control publication locations; they leave chart and application content unchanged. See [delivery file rules](reference/cli.md#delivery-files) for identity, validation and mapping precedence.
 
 Keep your edited file: exporting again generates defaults. [Update it](delivery-updates.md) when you refresh the bundle.
 
@@ -87,4 +87,4 @@ Push publishes content, [destination records](destinations.md) and aliases, then
 
 ## Output and errors
 
-See [CLI output](reference/cli.md) for JSON, templates and partial reports, and [publication behavior](reference/transfers.md#publication) for conflicts and retries.
+See [CLI output](reference/cli.md) for JSON, templates and partial reports, and [publication behavior](reference/cli.md#publication) for conflicts and retries.

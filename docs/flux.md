@@ -32,7 +32,7 @@ releases:
       context: production
 ```
 
-Each entry needs one matching local destination attachment and captured dependency resolution. Use the [capture selectors](reference/helm-consumer.md#select-a-capture) when several match. Requests cannot change this allowlist or combine captures.
+Each entry needs one matching local destination attachment and captured dependency resolution. Use the [capture selectors](reference/helm-discovery.md#select-a-capture) when several match. Requests cannot change this allowlist or combine captures.
 
 Copy the [bootstrap values](examples/flux-bootstrap/values.yaml) to `values.yaml`. Set the service image's destination repository and tag. Create `flux-system` if needed and provision the [credentials and TLS Secrets](#private-registry-configuration), then install:
 

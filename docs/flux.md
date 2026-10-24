@@ -11,10 +11,10 @@ Install Flux and [Flux Operator](https://fluxoperator.dev/) first. You also need
 Copy the [bootstrap recipe](examples/flux-bootstrap/bale.yaml) to `bale.yaml` and replace its references with your published artifacts. It includes both the image and chart explicitly:
 
 ```sh
-bale create --layout -f bale.yaml bootstrap --output-delivery bale.delivery.yaml
+bale create -f bale.yaml bootstrap --output-delivery bale.delivery.yaml
 ```
 
-Set their delivery paths to `images/bale-flux` and `charts/bale-flux`, then push:
+Creation locks metadata locally; push reads missing payloads from the pinned sources. Set their delivery paths to `images/bale-flux` and `charts/bale-flux`, then push:
 
 ```sh
 bale push bootstrap mirror.example.com/release:bootstrap --delivery bale.delivery.yaml

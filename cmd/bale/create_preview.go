@@ -127,6 +127,9 @@ func writeCreatePreview(out io.Writer, result bale.CreateResult) error {
 	var buffer bytes.Buffer
 	fmt.Fprintln(&buffer, "Dry run: nothing published.")
 	fmt.Fprintf(&buffer, "Bundle: %s\n", result.Descriptor.Digest)
+	if result.MetadataOnly {
+		fmt.Fprintln(&buffer, "Metadata capture: payloads remain at pinned sources until push or save.")
+	}
 	fmt.Fprintf(&buffer, "Artifacts: %d unique repository/digest identities\n", len(rows))
 	fmt.Fprintf(&buffer, "Roles (may overlap): %d input, %d dependency, %d plugin, %d attachment, %d content\n\n",
 		counts["input"], counts["dependency"], counts["plugin"], counts["attachment"], counts["content"])

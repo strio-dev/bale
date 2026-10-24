@@ -46,4 +46,4 @@ bale delivery update --layout ./locked ./refreshed \
   -f bale.delivery.yaml -o refreshed.report.delivery.yaml --format json
 ```
 
-Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate the full graph. [Report fields and exit status](reference/cli.md#update-reports) are listed in the reference.
+Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate paths and local content. Metadata captures still need their pinned sources during delivery. [Report fields and exit status](reference/cli.md#update-reports) are listed in the reference.

@@ -91,7 +91,7 @@ func TestDeliveryCLIValidationBeforeStorage(t *testing.T) {
 		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery="}, "nonempty path"},
 		{[]string{"inspect", "--layout", "missing", "other", "--output-delivery", "ignored.yaml"}, "requires one bundle"},
 		{[]string{"inspect", "--layout", "missing", "--output-delivery", "ignored.yaml", "--format", "json"}, "cannot be combined"},
-		{[]string{"create", "-f", existing, "unreachable.invalid/b:tag", "--output-delivery", existing}, "already exists"},
+		{[]string{"create", "--registry", "-f", existing, "unreachable.invalid/b:tag", "--output-delivery", existing}, "already exists"},
 		{[]string{"inspect", "--layout", "missing", "--output-delivery", existing}, "already exists"},
 		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery", malformed}, "unknown"},
 		{[]string{"push", "missing", "unreachable.invalid/b:tag", "--delivery", "missing-delivery-file"}, "no such file"},
@@ -160,7 +160,7 @@ func TestCreateDryRunExportsExactCapture(t *testing.T) {
 	}
 	output := filepath.Join(t.TempDir(), "delivery.yaml")
 	var out, errs bytes.Buffer
-	args := []string{"create", "-f", recipe, host + "/bundles:release", "--plain-http", host, "--dry-run", "--quiet", "--output-delivery", output}
+	args := []string{"create", "--registry", "-f", recipe, host + "/bundles:release", "--plain-http", host, "--dry-run", "--quiet", "--output-delivery", output}
 	if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
 		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
 	}

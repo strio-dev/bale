@@ -209,7 +209,7 @@ func TestOCIPluginCLI(t *testing.T) {
 	} {
 		t.Run("dry run "+tc.name, func(t *testing.T) {
 			var out, errs bytes.Buffer
-			args := []string{"create", "-f", recipe, bundleRef, "--dry-run", "--plugin-cache=", "--plain-http", host}
+			args := []string{"create", "--registry", "-f", recipe, bundleRef, "--dry-run", "--plugin-cache=", "--plain-http", host}
 			args = append(args, tc.flags...)
 			if code := run(args, &out, &errs); code != 0 {
 				t.Fatalf("dry run: %d %s %s", code, &out, &errs)
@@ -253,7 +253,7 @@ func TestOCIPluginCLI(t *testing.T) {
 		t.Fatalf("preview published registry content: writes %d -> %d", writesBeforePreview, writesAfterPreview)
 	}
 	var created bale.CreateResult
-	if err := json.Unmarshal(invoke("create", "-f", recipe, bundleRef, "-q", "--plugin-cache=", "--format=json"), &created); err != nil {
+	if err := json.Unmarshal(invoke("create", "--registry", "-f", recipe, bundleRef, "-q", "--plugin-cache=", "--format=json"), &created); err != nil {
 		t.Fatal(err)
 	}
 	if !created.Published || len(created.Metadata.Plugins) != 1 || created.Metadata.Plugins[0].Descriptor.Digest != published.Descriptor.Digest {

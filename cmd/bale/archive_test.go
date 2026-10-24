@@ -154,9 +154,9 @@ func TestArchiveCommandValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"save"}, {"save", "layout"}, {"save", "layout", "-o", ""},
 		{"save", "layout", "-o", "out", "--output", "other"},
-		{"save", "layout", "-o", "out", "--plain-http", "localhost:5000"},
 		{"load"}, {"load", "layout"}, {"load", "-i", "", "layout"},
 		{"load", "-i", "archive", "one", "two"},
+		{"load", "-i", "archive", "layout", "--plain-http", "localhost:5000"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 125 || out.Len() != 0 || !strings.HasPrefix(errs.String(), "Error:") {
@@ -165,8 +165,133 @@ func TestArchiveCommandValidation(t *testing.T) {
 	}
 	for _, command := range []string{"save", "load"} {
 		var out, errs bytes.Buffer
-		if code := run([]string{"help", command}, &out, &errs); code != 0 || errs.Len() != 0 || !strings.Contains(out.String(), "bale "+command+" [options]") || strings.Contains(out.String(), "--plain-http") {
+		if code := run([]string{"help", command}, &out, &errs); code != 0 || errs.Len() != 0 || !strings.Contains(out.String(), "bale "+command+" [options]") || strings.Contains(out.String(), "--plain-http") != (command == "save") {
 			t.Fatalf("%s help: exit %d stdout %s stderr %s", command, code, &out, &errs)
 		}
+	}
+}
+
+func TestMetadataCreateDefersPayloadsUntilSave(t *testing.T) {
+	fixture, _, payload := cliBundle(t)
+	client, err := bale.NewClient(bale.ClientOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := client.InspectLayout(t.Context(), fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := inspection.Metadata.Roots[0].Descriptor
+	var requests, mutations, payloadReads atomic.Int32
+	var rejectTag atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			mutations.Add(1)
+			http.Error(w, "read-only source", http.StatusForbidden)
+			return
+		}
+		if user, password, ok := r.BasicAuth(); !ok || user != "capture" || password != "fixture" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="capture"`)
+			http.Error(w, "credentials required", http.StatusUnauthorized)
+			return
+		}
+		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		if name == "stable" {
+			if rejectTag.Load() {
+				http.NotFound(w, r)
+				return
+			}
+			name = member.Digest.String()
+		}
+		dgst, err := digest.Parse(name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && dgst == payload.Digest {
+			payloadReads.Add(1)
+		}
+		raw, err := os.ReadFile(filepath.Join(fixture, "blobs", dgst.Algorithm().String(), dgst.Encoded()))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeLayoutResponse(w, r, raw, name)
+	}))
+	defer server.Close()
+	host := strings.TrimPrefix(server.URL, "http://")
+	credentials := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", credentials)
+	config := fmt.Sprintf(`{"auths":{%q:{"auth":%q}}}`, host, base64.StdEncoding.EncodeToString([]byte("capture:fixture")))
+	configPath := filepath.Join(credentials, "config.json")
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	recipe, capture := filepath.Join(dir, "bale.yaml"), filepath.Join(dir, "capture")
+	data := fmt.Sprintf("include:\n  - ref: %s/app:stable\n    dependencies:\n      follow: none\n    referrers:\n      include: none\n", host)
+	if err := os.WriteFile(recipe, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(args ...string) []byte {
+		t.Helper()
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+			t.Fatalf("%v: exit %d stdout %s stderr %s", args, code, &out, &errs)
+		}
+		return out.Bytes()
+	}
+	dryPath := filepath.Join(dir, "preview")
+	preview := invoke("create", "-f", recipe, dryPath, "--dry-run", "--plain-http", host, "--quiet")
+	if !strings.Contains(string(preview), "payloads remain at pinned sources") {
+		t.Fatalf("create preview hid source dependence: %s", preview)
+	}
+	if _, err := os.Stat(dryPath); !os.IsNotExist(err) {
+		t.Fatalf("create preview wrote a local capture: %v", err)
+	}
+	createdJSON := invoke("create", "-f", recipe, capture, "--plain-http", host, "--format=json", "--quiet")
+	var created bale.CreateResult
+	if err := json.Unmarshal(createdJSON, &created); err != nil || !created.MetadataOnly || created.Published || created.LayoutPath != capture {
+		t.Fatalf("metadata create %s: %v", createdJSON, err)
+	}
+	if payloadReads.Load() != 0 || mutations.Load() != 0 {
+		t.Fatalf("creation transferred payloads or wrote sources: payloads=%d mutations=%d", payloadReads.Load(), mutations.Load())
+	}
+	if _, err := os.Stat(filepath.Join(capture, "blobs", payload.Digest.Algorithm().String(), payload.Digest.Encoded())); !os.IsNotExist(err) {
+		t.Fatalf("metadata capture retained an opaque payload: %v", err)
+	}
+	// Neither local inspection nor planning may consult sources or credentials.
+	before := requests.Load()
+	if err := os.WriteFile(configPath, []byte("invalid credentials JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	inspectedJSON := invoke("inspect", "--layout", capture)
+	var inspected []bale.InspectResult
+	if err := json.Unmarshal(inspectedJSON, &inspected); err != nil || len(inspected) != 1 || !inspected[0].MetadataOnly || inspected[0].Descriptor.Digest != created.Descriptor.Digest {
+		t.Fatalf("metadata inspection %s: %v", inspectedJSON, err)
+	}
+	preview = invoke("push", capture, "destination.invalid/release:bundle", "--dry-run", "--quiet")
+	if !strings.Contains(string(preview), "actual push needs source access") || requests.Load() != before {
+		t.Fatalf("metadata preview hid source dependence or accessed sources: %s", preview)
+	}
+	rejectTag.Store(true)
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(dir, "capture.tar")
+	invoke("save", capture, "-o", archive, "--plain-http", host, "--quiet")
+	if payloadReads.Load() == 0 || mutations.Load() != 0 {
+		t.Fatalf("save did not materialize read-only payloads: payloads=%d mutations=%d", payloadReads.Load(), mutations.Load())
+	}
+	server.Close()
+	if err := os.WriteFile(configPath, []byte("invalid credentials JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(dir, "restored")
+	invoke("load", "-i", archive, restored, "--quiet")
+	result, err := client.InspectLayout(t.Context(), restored)
+	if err != nil || result.MetadataOnly || result.Descriptor.Digest != created.Descriptor.Digest {
+		t.Fatalf("saved capture is not a complete pinned offline bundle: %+v %v", result, err)
 	}
 }

@@ -36,9 +36,12 @@ func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (res
 	if err := checkArchiveDestination(archivePath); err != nil {
 		return result, err
 	}
-	store, snapshot, err := openLayout(ctx, layoutPath)
+	store, snapshot, capture, _, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
 		return result, err
+	}
+	if capture != nil {
+		store = captureSource{local: store, service: s, sources: capture.Sources}
 	}
 	result.Descriptor = snapshot.Descriptor
 	parent := filepath.Dir(filepath.Clean(archivePath))

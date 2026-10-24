@@ -32,7 +32,7 @@ recipe, err := bale.ParseRecipe([]byte(`include:
 if err != nil {
     return err
 }
-captured, err := client.CreateLayout(ctx, recipe, "./release", bale.CreateOptions{
+captured, err := client.CreateLocal(ctx, recipe, "./release", bale.CreateOptions{
     ExportDelivery: true,
 })
 if err != nil {
@@ -46,14 +46,15 @@ _, err = client.Load(ctx, "./release.tar", "./restored")
 return err
 ```
 
-`ParseRecipe` reads strict authoring YAML; `NormalizeRecipe` validates and applies defaults to a deep copy of a Go recipe. `CreateLayout` needs only source read access. `CreateOptions.DryRun` captures without installing a layout; `ExportDelivery` returns paths from that exact capture. `LayoutPath` confirms completed local output; `Published` is reserved for registry publication.
+`ParseRecipe` reads strict authoring YAML; `NormalizeRecipe` validates and applies defaults to a deep copy of a Go recipe. `CreateLocal` needs only source read access and returns a source-dependent capture with `MetadataOnly: true`. It retains manifests and interpreted metadata without downloading ordinary image payloads; discovery may read chart and plugin bytes. `CreateLayout` instead downloads a complete offline layout. `CreateOptions.DryRun` retains no local output; `ExportDelivery` returns paths from that exact capture. `LayoutPath` confirms completed local output; `Published` is reserved for registry publication.
 
-`Save` and `Load` verify the captured graph and preserve digests in an uncompressed, deduplicated OCI-layout tar archive. They are offline and require new destination paths. `ArchiveResult` reports `Descriptor`, `LayoutPath` and `ArchivePath`. Other local APIs take the layout directory, not the tar filename.
+`Save` reads any missing payloads from the capture's pinned sources and verifies the complete graph before publishing an uncompressed, deduplicated OCI-layout tar archive. Supply credentials and transport options on the client. It preserves the bundle digest and leaves the capture unchanged. Save from a complete layout and `Load` are offline. Both require new destination paths. `ArchiveResult` reports `Descriptor`, `LayoutPath` and `ArchivePath`. Other local APIs take the directory, not the tar filename.
 
 | Operation | API |
 | --- | --- |
 | Capture to a registry | `Create(ctx, recipe, reference, options)` |
-| Capture to a local layout | `CreateLayout(ctx, recipe, path, options)` |
+| Lock local metadata | `CreateLocal(ctx, recipe, path, options)` |
+| Download a complete local layout | `CreateLayout(ctx, recipe, path, options)` |
 | Retrieve a bundle | `Pull(ctx, reference, path, PullLocked)` or `PullLatest` |
 | Archive / restore | `Save(ctx, layout, archive)` / `Load(ctx, archive, layout)` |
 | Plan / publish a layout | `PlanPush(ctx, layout, destination, options)` / `Push(ctx, plan)` |
@@ -171,7 +172,7 @@ Referrer filters apply after validating envelopes and subjects. Without an expli
 
 Registry variants pin each reference once; identical operands share a read in comparison and updates. Layout variants are offline. Root variants use pinned descriptors without closing or modifying caller-owned stores.
 
-Inspection returns `Descriptor`, `Metadata` and selected `Declarations` after verifying the complete captured graph, including nested bundle metadata. It can hash substantial remote payloads. Metadata retains recipes, roots, origins, referrers, dependency resolutions and plugin provenance. Inspect a nested bundle separately with its descriptor and the same store. Failure returns an empty report and typed error; integrity verification does not verify publisher signatures.
+`InspectLayout` recognizes marked metadata captures and returns `MetadataOnly: true` after verifying their local manifests and interpreted metadata, including nested bundles. It makes no source requests and does not prove missing payload availability or integrity. Complete layouts, registry inspection and caller-owned roots receive full graph verification, which can hash substantial payloads. Reports include `Descriptor`, `Metadata` and selected `Declarations`. Metadata retains recipes, roots, origins, referrers, dependency resolutions and plugin provenance. Inspect a nested bundle separately with its descriptor and the same store. Failure returns an empty report and typed error; integrity verification does not verify publisher signatures.
 
 ## Compare bundles
 
@@ -181,12 +182,12 @@ Diff validates envelopes and interpreted metadata, including nested metadata, wi
 
 ## Export and apply delivery paths
 
-Export returns a `DeliveryFile` bound to the bundle digest. Its `Artifacts` contain source `Ref` and relative destination `Path`, flattening nested inventories. `EncodeDeliveryFile` and `DecodeDeliveryFile` handle strict YAML. Registry export validates captured manifests and metadata without checking opaque payloads; layout and root export verify the complete captured graph.
+Export returns a `DeliveryFile` bound to the bundle digest. Its `Artifacts` contain source `Ref` and relative destination `Path`, flattening nested inventories. `EncodeDeliveryFile` and `DecodeDeliveryFile` handle strict YAML. Registry export and export from a marked metadata capture validate manifests and interpreted metadata without checking opaque payloads; complete layouts and caller-owned roots receive full graph verification.
 
-Pass an edited file as `PushOptions.Delivery` to `PlanPush`. Paths override `RepositoryMap`; omitted rows retain defaults and remain included. Planning verifies the entire local graph, digest binding, captured identities and destination layout without network access or writes. Its sealed, in-memory `DeliveryPlan` reports planned `Relocations`, `Repositories`, `Tags` and `Destinations`; `Destination` is the bundle completion reference. JSON output cannot be reloaded as an executable plan. Remote availability, credentials and existing tags are checked during `Push`. Its result retains confirmed `Relocations` and `Tags` on failure; `Repositories`, `RepositoryMap` and `Referrers` describe planned work. See [delivery paths](transfers.md#export-delivery-paths).
+Pass an edited file as `PushOptions.Delivery` to `PlanPush`. Paths override `RepositoryMap`; omitted rows retain defaults and remain included. Planning verifies local metadata, digest binding, captured identities and destination layout without network access or writes. Complete layouts also receive full payload verification. Its sealed, in-memory `DeliveryPlan` reports `MetadataOnly` and planned `Relocations`, `Repositories`, `Tags` and `Destinations`; `Destination` is the bundle completion reference. The plan binds the capture's pinned source locations and rejects locator changes before execution. JSON output cannot be reloaded as an executable plan. `Push` reads missing payloads by pinned digest, reuses destination content or registry mounts when possible, and verifies streamed uploads. It checks source and destination access and existing tags without resolving mutable source tags or rerunning plugins. Its result retains confirmed `Relocations` and `Tags` on failure; `Repositories`, `RepositoryMap` and `Referrers` describe planned work. See [delivery paths](transfers.md#export-delivery-paths).
 
 ## Update delivery paths
 
 Update methods return a candidate file; they do not write it. `DeliveryUpdateResult` contains `Before`, `After`, `Delivery`, sorted `Changes` and `Conflicts`. Preserve authored paths for exact identities or unambiguous one-to-one selector changes, including nested inventories. New, unclaimed artifacts receive default paths; omitted old rows make no path claim.
 
-The old file must match the old snapshot and contain only captured identities. Ambiguity returns `ErrConflict` with diagnostics and no candidate `Delivery`; other failures return an empty result. Update validates metadata without reading opaque payloads or refreshing sources. Use `PlanPush` for full local graph validation before publication. See [delivery updates](delivery-updates.md) for matching and conflict rules.
+The old file must match the old snapshot and contain only captured identities. Ambiguity returns `ErrConflict` with diagnostics and no candidate `Delivery`; other failures return an empty result. Update validates metadata without reading opaque payloads or refreshing sources. Use `PlanPush` to validate local content and publication paths; metadata captures still depend on their pinned sources during `Push`. See [delivery updates](delivery-updates.md) for matching and conflict rules.

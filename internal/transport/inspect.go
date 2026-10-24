@@ -21,6 +21,7 @@ import (
 // or discovering additional referrers. Declarations belong to the root bundle;
 // nested native bundles can be inspected separately using their pinned roots.
 type InspectResult struct {
+	MetadataOnly bool                   `json:"metadataOnly,omitempty"`
 	Descriptor   v1.Descriptor          `json:"descriptor"`
 	Metadata     bundle.Metadata        `json:"metadata"`
 	Declarations []InspectedDeclaration `json:"declarations"`
@@ -81,7 +82,27 @@ func (s *Service) inspectLayout(ctx context.Context, path string, load func(cont
 	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
 		return fail(ErrIntegrity, fmt.Errorf("layout must contain exactly one bundle root"))
 	}
-	return s.inspectRoot(ctx, Root{Descriptor: index.Manifests[0], Store: oci.NewStorageFromFS(os.DirFS(path))}, load)
+	store := oci.NewStorageFromFS(os.DirFS(path))
+	_, markerErr := os.Lstat(filepath.Join(path, captureFile))
+	metadataOnly := markerErr == nil
+	if markerErr != nil && !os.IsNotExist(markerErr) {
+		return fail(nil, markerErr)
+	}
+	if metadataOnly {
+		load = bundle.InspectSnapshotGraph
+	}
+	result, err := s.inspectRoot(ctx, Root{Descriptor: index.Manifests[0], Store: store}, load)
+	if err != nil {
+		return InspectResult{}, err
+	}
+	if metadataOnly {
+		snapshot := bundle.Snapshot{Descriptor: result.Descriptor, Metadata: result.Metadata}
+		if _, _, err := readLocalCapture(ctx, path, store, snapshot); err != nil {
+			return fail(ErrIntegrity, err)
+		}
+		result.MetadataOnly = true
+	}
+	return result, nil
 }
 
 func layoutReadKind(err error) error {

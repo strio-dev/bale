@@ -6,7 +6,7 @@ Configure credentials for transfers and retention for every repository that hold
 
 The CLI uses Docker credential configuration, including `DOCKER_CONFIG`. Log in with your usual Docker-compatible registry tool before transfer.
 
-For a local HTTP registry, add `--plain-http localhost:5000`. Repeat the option for each exact host that needs HTTP. Save, load and local inspection work offline and do not load registry credentials.
+For a local HTTP registry, add `--plain-http localhost:5000`. Repeat the option for each exact host that needs HTTP. Saving a metadata capture and pushing it need access to its pinned sources. Saving a complete layout, loading an archive and local inspection work offline without registry credentials.
 
 The [SDK](sdk.md#configure-a-client) defaults to anonymous access; callers supply credentials and configure HTTP/TLS transport.
 

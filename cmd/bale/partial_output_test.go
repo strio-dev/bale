@@ -65,7 +65,7 @@ func TestTransferPartialJSON(t *testing.T) {
 		var args []string
 		switch command {
 		case "create":
-			args = []string{command, "-f", recipe, host + "/destination:bundle"}
+			args = []string{command, "--registry", "-f", recipe, host + "/destination:bundle"}
 		case "pull":
 			args = []string{command, host + "/bundles:release", filepath.Join(t.TempDir(), "pulled")}
 		case "push":
@@ -132,7 +132,7 @@ func TestTransferPartialJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, args := range [][]string{
-			{"create", "-f", missingRecipe, host + "/destination:bundle"},
+			{"create", "--registry", "-f", missingRecipe, host + "/destination:bundle"},
 			{"pull", host + "/bundles:missing", filepath.Join(t.TempDir(), "pulled")},
 		} {
 			var out, errs bytes.Buffer
@@ -195,8 +195,8 @@ func TestTransferJSONWithoutResultStaysEmpty(t *testing.T) {
 	for _, args := range [][]string{
 		{"push", "missing-layout", "example.invalid/bundle:v1"},
 		{"push", "missing-layout", "example.invalid/bundle:v1", "--dry-run"},
-		{"create", "-f", recipe, "example.invalid/bundle:v1"},
-		{"create", "-f", "missing-recipe", "example.invalid/bundle:v1"},
+		{"create", "--registry", "-f", recipe, "example.invalid/bundle:v1"},
+		{"create", "--registry", "-f", "missing-recipe", "example.invalid/bundle:v1"},
 		{"pull", "example.invalid/bundle", "unused"},
 	} {
 		var out, errs bytes.Buffer

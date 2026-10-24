@@ -44,10 +44,10 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-Capture their current digests and save a portable archive:
+Lock their current digests, then download a portable archive:
 
 ```sh
-bale create --layout -f bale.yaml ./release
+bale create -f bale.yaml ./release
 bale save ./release -o release.tar
 ```
 

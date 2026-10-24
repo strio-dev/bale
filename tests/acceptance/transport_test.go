@@ -69,7 +69,7 @@ func TestRegistryTransportAcceptance(t *testing.T) {
 			// Fixture creation is local HTTP; every transport assertion below uses
 			// HTTPS without --plain-http or an insecure verification override.
 			command := cli{t: t, ctx: ctx, binary: paths[0], env: []string{"DOCKER_CONFIG=" + configDir}, hosts: []string{registry.host}}
-			created := decode[bale.CreateResult](t, command.run("transport fixture", "create", registry.host+"/bundles:transport", "--file", recipe, "--format", "json"))
+			created := decode[bale.CreateResult](t, command.run("transport fixture", "create", "--registry", registry.host+"/bundles:transport", "--file", recipe, "--format", "json"))
 			upstream, err := url.Parse("http://" + registry.host)
 			if err != nil {
 				t.Fatal(err)

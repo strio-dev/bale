@@ -70,6 +70,33 @@ func TestFlagsAfterOperands(t *testing.T) {
 	}
 }
 
+func TestCreateOutputModes(t *testing.T) {
+	for _, tc := range []struct {
+		flags            []string
+		layout, registry bool
+	}{
+		{},
+		{flags: []string{"--layout"}, layout: true},
+		{flags: []string{"--registry"}, registry: true},
+		{flags: []string{"--layout=false", "--registry"}, registry: true},
+		{flags: []string{"--registry=false", "--layout"}, layout: true},
+	} {
+		opts, err := parseCommand("create", append(tc.flags, "-f", "bale.yaml", "output"))
+		if err != nil || opts.layout != tc.layout || opts.registry != tc.registry {
+			t.Fatalf("%v: %+v %v", tc.flags, opts, err)
+		}
+	}
+	var out, errs bytes.Buffer
+	if code := run([]string{"create", "--layout", "--registry", "-f", "missing", "output"}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "cannot be combined") {
+		t.Fatalf("conflicting output modes: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
+	for _, expected := range []string{"local metadata capture", "--registry", "--layout", "bale create -f bale.yaml ./release"} {
+		if !strings.Contains(commandHelp("create"), expected) {
+			t.Errorf("create help missing %q", expected)
+		}
+	}
+}
+
 func TestMappingValidation(t *testing.T) {
 	for _, maps := range [][]string{{"example.com/a=../bad"}, {"example.com/a=/absolute"}, {"example.com/a:tag=x"}, {"example.com/a=x", "example.com/a=y"}, {"team/a=x"}} {
 		if _, err := parseMaps(maps); err == nil {

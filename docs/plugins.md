@@ -1,6 +1,6 @@
 # Dependency plugins
 
-Run a registry-hosted plugin during bundle creation to discover an artifact's dependencies. Bale captures the plugin package, its generated [declaration](dependencies.md) and the resolved artifacts together.
+Run a registry-hosted plugin during bundle creation to discover an artifact's dependencies. Bale locks the plugin package and resolved artifacts together with the generated [declaration](dependencies.md).
 
 For charts, follow the [Helm guide](helm.md). To write a plugin, see the [WASI protocol and Go example](reference/plugin-runtime.md).
 
@@ -23,7 +23,7 @@ include:
 ```
 
 ```sh
-bale create --layout -f bale.yaml ./release
+bale create -f bale.yaml ./release
 ```
 
 Replace the chart and plugin references. Each needs an explicit registry and tag or digest; pin the plugin digest to keep its code fixed across new captures.
@@ -36,7 +36,7 @@ An input with a plugin cannot also set `dependencies.follow: none` or `dependenc
 
 ## Capture and refresh
 
-Creation runs discovery and resolves the returned references. It saves the declaration in the bundle without writing to the source registry. Dry-run creation also runs discovery, but retains no content.
+Creation reads the plugin and its bound inputs, runs discovery and resolves the returned references. It saves the declaration locally without writing to the source registry; ordinary image payloads are deferred until save or push. Dry-run creation also runs discovery, but retains no content.
 
 Locked pull, inspection and push use the capture. To rerun discovery while refreshing tags, authorize plugins explicitly:
 

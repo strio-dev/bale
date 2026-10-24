@@ -7,7 +7,7 @@ bale inspect registry.example.com/bundles/release:v1
 bale inspect --layout ./release
 ```
 
-The JSON report includes captured artifacts, origins, referrers, dependencies and selected declarations. Inspection validates the complete graph, including payloads and nested bundle metadata. Registry inspection can take time for large bundles. Digest checks do not verify publisher signatures.
+The JSON report includes captured artifacts, origins, referrers, dependencies and selected declarations. A local metadata capture reports `metadataOnly: true`: inspection verifies its manifests and interpreted metadata without contacting sources or checking payload availability. Complete layouts and registry bundles receive full payload verification, which can take time for large bundles. Digest checks do not verify publisher signatures.
 
 ## Compare snapshots
 
@@ -43,7 +43,7 @@ bale inspect --layout ./release --output-delivery local.delivery.yaml
 
 Use a new file and edit its paths before [delivery](transfers.md#export-delivery-paths). Export takes one bundle and replaces normal inspection output; it cannot be combined with `--format`.
 
-Registry export reads metadata without downloading payloads, so it does not check their availability or integrity. Local export validates the complete graph. Re-exporting produces defaults rather than recovering earlier edits.
+Registry export and export from a local metadata capture verify metadata without downloading payloads or checking their availability. Complete local layouts receive full graph validation. Re-exporting produces defaults rather than recovering earlier edits.
 
 ## JSON and templates
 

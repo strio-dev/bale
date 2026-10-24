@@ -6,7 +6,7 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 
 | Command | Purpose |
 | --- | --- |
-| `create` | Capture recipe inputs in a registry or, with `--layout`, a local directory. |
+| `create` | Lock recipe metadata locally; use `--registry` for registry storage or `--layout` for a complete offline directory. |
 | `pull` / `push` | Retrieve a captured bundle or deliver a local layout. |
 | `save` / `load` | Write or restore an offline OCI archive. |
 | `inspect` / `diff` | Read inventory or compare two snapshots. |
@@ -44,9 +44,13 @@ On failed `create`, `pull` or `push`, explicit JSON output can retain a result d
 
 ## Validation and previews
 
-Full bundle inspection, local delivery-file export and push validate complete captured content. Diff, delivery update and registry delivery-file export read verified metadata without checking opaque payload availability. Destination inspection validates its attached metadata without following recorded locations.
+Default creation writes a source-dependent metadata capture. `create --layout` downloads a complete local layout; `create --registry` stores the complete graph in the supplied registry repository. These options are mutually exclusive.
 
-`create --dry-run` resolves source content and runs configured discovery plugins. Registry creation also reads the holding registry to check tag conflicts; local `--layout` preview needs no holding registry. Neither form publishes a bundle. `push --dry-run` validates the local graph and computes paths without registry access; it does not check destination credentials, availability or tag conflicts.
+Local inspection, delivery export and push preview verify metadata captures without source access. Inspection reports and JSON push plans identify them with `metadataOnly: true`. Complete layouts also receive full payload validation. Diff, delivery update and registry delivery-file export read verified metadata without checking opaque payload availability. Destination inspection validates its attached metadata without following recorded locations.
+
+`create --dry-run` resolves source content and runs configured discovery plugins without retaining a capture. With `--registry`, it also reads the holding registry to check tag conflicts. Local creation needs no writable registry. `push --dry-run` validates local content and computes paths without registry access; it does not check missing source payloads, destination credentials, availability or tag conflicts.
+
+Push reads missing payloads from a metadata capture's pinned sources, reusing destination blobs or registry mounts when possible. Save downloads missing payloads into a complete offline archive. Neither operation refreshes tags or runs plugins. Save from a complete layout and load remain offline.
 
 ## Credentials and transport
 
@@ -81,7 +85,7 @@ Conflicting paths or multiple selector resolutions prevent output. An artifact t
 
 ### Inspection and comparison
 
-Inspection and local delivery export validate the complete graph. Diff and registry export read manifests and interpreted metadata without checking opaque payloads. None refresh selectors or run plugins.
+Inspection and local delivery export validate manifests and interpreted metadata in source-dependent captures, and the complete graph in full layouts. Diff and registry export read metadata without checking opaque payloads. None refresh selectors or run plugins.
 
 Each registry reference resolves once, so comparing a mutable tag with itself uses one pinned snapshot. Repeated selectors are compared as sets. Detailed selector/declaration changes describe root bundles; nested inventory membership is included. Compare nested bundles separately for their details. Artifact identity is repository plus digest; opaque blobs are excluded. A tag moving to already-captured content still produces a selector change.
 

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/strio-dev/bale"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 func runArchive(ctx context.Context, command string, opts commandOptions, out, errOut io.Writer) int {
@@ -16,8 +19,12 @@ func runArchive(ctx context.Context, command string, opts commandOptions, out, e
 	if err != nil {
 		return fail(errOut, err)
 	}
-	// Archive operations are local and must not depend on Docker credentials.
-	client, err := bale.NewClient(bale.ClientOptions{})
+	options := bale.ClientOptions{}
+	if command == "save" {
+		options.PlainHTTPRegistries = opts.plainHTTP
+		options.Credentials = lazyDockerCredentials()
+	}
+	client, err := bale.NewClient(options)
 	if err != nil {
 		return fail(errOut, err)
 	}
@@ -34,4 +41,23 @@ func runArchive(ctx context.Context, command string, opts commandOptions, out, e
 		return fail(errOut, err)
 	}
 	return 0
+}
+
+// A complete local bundle stays independent of ambient Docker configuration.
+// Only saving a metadata capture can require an authenticated source request.
+func lazyDockerCredentials() auth.CredentialFunc {
+	initialize := sync.OnceValues(func() (auth.CredentialFunc, error) {
+		store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+		if err != nil {
+			return nil, err
+		}
+		return credentials.Credential(store), nil
+	})
+	return func(ctx context.Context, host string) (auth.Credential, error) {
+		lookup, err := initialize()
+		if err != nil {
+			return auth.Credential{}, err
+		}
+		return lookup(ctx, host)
+	}
 }

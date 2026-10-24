@@ -11,11 +11,11 @@ Discovery renders chart defaults with release `web`, namespace `apps` and contex
 ## Capture and choose paths
 
 ```sh
-bale create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
+bale create -f bale.yaml ./release --output-delivery bale.delivery.yaml
 bale inspect --layout ./release
 ```
 
-Review the inventory and edit `path` values in `bale.delivery.yaml`:
+Creation reads discovery inputs and locks metadata locally. Keep source access available until save finishes. Review the inventory and edit `path` values in `bale.delivery.yaml`:
 
 | Artifact | Delivery path |
 | --- | --- |
@@ -32,7 +32,7 @@ bale push ./release mirror.example.com/release:bundle --delivery bale.delivery.y
 bale save ./release -o release.tar
 ```
 
-Carry `release.tar` and the edited delivery file to the receiving machine. Archive and layout output paths must be new. Placement stays separate from captured content.
+Save downloads the pinned content and validates the complete archive. Carry `release.tar` and the edited delivery file to the receiving machine. Archive and layout output paths must be new. Placement stays separate from captured content.
 
 ## Restore and deliver
 

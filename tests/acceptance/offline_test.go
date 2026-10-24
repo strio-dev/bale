@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	digest "github.com/opencontainers/go-digest"
+
 	"github.com/strio-dev/bale"
 	"github.com/strio-dev/bale/internal/wasmtest"
 	"github.com/strio-dev/bale/plugin"
@@ -53,12 +55,16 @@ func TestOfflineAcceptance(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
-			runOfflineCycle(t, ctx, paths[0], backend.name, backend.binary)
+			for _, metadataOnly := range []bool{false, true} {
+				t.Run(fmt.Sprintf("metadata-only=%t", metadataOnly), func(t *testing.T) {
+					runOfflineCycle(t, ctx, paths[0], backend.name, backend.binary, metadataOnly)
+				})
+			}
 		})
 	}
 }
 
-func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend string) {
+func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend string, metadataOnly bool) {
 	source := startRegistry(t, ctx, kind, backend, "offline source")
 	destination := startRegistry(t, ctx, kind, backend, "offline destination")
 	upstream, err := url.Parse("http://" + source.host)
@@ -93,8 +99,10 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		defer setPhase("after " + phase)
 		return command.run(phase, args...)
 	}
-	var readOnly atomic.Bool
-	var sourceReads, sourceWrites atomic.Int64
+	var readOnly, forbidOpaqueReads atomic.Bool
+	var sourceReads, sourceWrites, opaqueReads atomic.Int64
+	imageLayer := digest.FromBytes(make([]byte, 1024)).String()
+	componentPayload := digest.FromString("component-v1").String()
 	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +113,11 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 			trace.requests = append(trace.requests, fmt.Sprintf("phase=%q method=%s path=%q host=%q remote=%q user-agent=%q", trace.phase, r.Method, r.URL.RequestURI(), r.Host, r.RemoteAddr, r.UserAgent()))
 		}
 		trace.Unlock()
+		if forbidOpaqueReads.Load() && r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") && (strings.HasSuffix(r.URL.Path, imageLayer) || strings.HasSuffix(r.URL.Path, componentPayload)) {
+			opaqueReads.Add(1)
+			http.Error(w, "application payload GET forbidden during mount", http.StatusForbidden)
+			return
+		}
 		if readOnly.Load() {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				sourceWrites.Add(1)
@@ -112,6 +125,9 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 				return
 			}
 			sourceReads.Add(1)
+			if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") && (strings.HasSuffix(r.URL.Path, imageLayer) || strings.HasSuffix(r.URL.Path, componentPayload)) {
+				opaqueReads.Add(1)
+			}
 		}
 		proxy.ServeHTTP(w, r)
 	})))
@@ -174,14 +190,21 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	readOnly.Store(true)
 	original := filepath.Join(dir, "release")
 	deliveryPath := filepath.Join(dir, "bale.delivery.yaml")
-	dry := decode[bale.CreateResult](t, run(command, "local capture preview", "create", "--layout", "-f", recipe, original, "--dry-run", "--format", "json"))
+	captureArgs := []string{"create", "-f", recipe, original}
+	if !metadataOnly {
+		captureArgs = append(captureArgs, "--layout")
+	}
+	dry := decode[bale.CreateResult](t, run(command, "local capture preview", append(append([]string{}, captureArgs...), "--dry-run", "--format", "json")...))
 	if dry.Published || !dry.DryRun || dry.LayoutPath != "" {
 		t.Fatal("local preview reported publication")
 	}
 	if _, err := os.Stat(original); !os.IsNotExist(err) {
 		t.Fatal("dry run created a layout")
 	}
-	captured := decode[bale.CreateResult](t, run(command, "read-only local capture", "create", "--layout", "-f", recipe, original, "--output-delivery", deliveryPath, "--format", "json"))
+	captured := decode[bale.CreateResult](t, run(command, "read-only local capture", append(append([]string{}, captureArgs...), "--output-delivery", deliveryPath, "--format", "json")...))
+	if captured.MetadataOnly != metadataOnly || (metadataOnly && opaqueReads.Load() != 0) {
+		t.Fatalf("metadata capture downloaded application payloads or misreported mode: mode=%t reads=%d", captured.MetadataOnly, opaqueReads.Load())
+	}
 	if captured.Published || captured.LayoutPath != original || captured.Descriptor.Digest != dry.Descriptor.Digest {
 		t.Fatal("local capture changed digest or registry publication semantics")
 	}
@@ -193,6 +216,34 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		t.Fatal("local capture omitted plugin provenance")
 	}
 	archive := filepath.Join(dir, "release.tar")
+	if metadataOnly {
+		reads := sourceReads.Load()
+		plan := decode[bale.DeliveryPlan](t, run(command, "offline metadata delivery preview", "push", original, destination.host+"/direct:bundle", "--dry-run", "--format", "json"))
+		if !plan.MetadataOnly || sourceReads.Load() != reads {
+			t.Fatal("metadata preview read source or lost source dependence")
+		}
+		// A producer advances a mutable dependency tag after capture. Delivery and
+		// archive materialization must continue using the captured digest.
+		readOnly.Store(false)
+		if kind == "distribution" {
+			forbidOpaqueReads.Store(true)
+			mounted := decode[bale.PushResult](t, run(command, "same-registry metadata mount", "push", original, sourceHost+"/mounted:bundle", "--format", "json"))
+			forbidOpaqueReads.Store(false)
+			if mounted.Descriptor.Digest != captured.Descriptor.Digest || mounted.Stats.BlobsMounted == 0 || mounted.Stats.BlobBytesDownloaded != 0 || opaqueReads.Load() != 0 {
+				t.Fatalf("same-registry capture failed to mount without payload reads: %+v, opaque GETs=%d", mounted.Stats, opaqueReads.Load())
+			}
+		}
+		seed(t, ctx, client, sourceHost, "offline-runtime", "runtime-v2", true)
+		readOnly.Store(true)
+		direct := decode[bale.PushResult](t, run(command, "direct pinned metadata delivery", "push", original, destination.host+"/direct:bundle", "--format", "json"))
+		if direct.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("direct metadata delivery refreshed its snapshot")
+		}
+		saved := decode[bale.ArchiveResult](t, run(command, "materialize metadata archive", "save", original, "-o", archive, "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest || opaqueReads.Load() == 0 {
+			t.Fatal("archive materialization lost identity or did not fetch omitted payloads")
+		}
+	}
 	setPhase("stop original source")
 	source.stop(t)
 	trace.Lock()
@@ -216,9 +267,16 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	offline.hosts = nil
 	offline.env = append(append([]string{}, command.env...), "PATH="+helperDir)
 	readsBefore := sourceReads.Load()
-	saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", original, "-o", archive, "--format", "json"))
-	if saved.Descriptor.Digest != captured.Descriptor.Digest {
-		t.Fatal("save changed bundle digest")
+	if !metadataOnly {
+		saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", original, "-o", archive, "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("save changed bundle digest")
+		}
+	} else {
+		inspected := decode[[]bale.InspectResult](t, run(offline, "metadata inspection after source shutdown", "inspect", "--layout", original))
+		if len(inspected) != 1 || !inspected[0].MetadataOnly {
+			t.Fatal("offline metadata inspection failed")
+		}
 	}
 	assertArchiveDeduplicated(t, archive)
 	if err := os.RemoveAll(original); err != nil {
@@ -230,6 +288,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		t.Fatal("load did not retain archive identity")
 	}
 	after := decode[[]bale.InspectResult](t, run(offline, "inspect restored bundle", "inspect", "--layout", restoredPath))
+	before[0].MetadataOnly = false // The restored archive is complete, with unchanged inventory.
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("archive roundtrip changed verified inventory")
 	}

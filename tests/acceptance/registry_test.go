@@ -363,7 +363,7 @@ func runRegistryCycle(t *testing.T, ctx context.Context, binary, kind, backend s
 	oldFile := filepath.Join(dir, "old.delivery.yaml")
 	newFile := filepath.Join(dir, "updated.delivery.yaml")
 	bundleRef := holding.host + "/bundles:before"
-	created := decode[bale.CreateResult](t, command.run("capture", "create", bundleRef, "--file", recipe, "--output-delivery", oldFile, "--format", "json"))
+	created := decode[bale.CreateResult](t, command.run("capture", "create", "--registry", bundleRef, "--file", recipe, "--output-delivery", oldFile, "--format", "json"))
 	locked, latest := filepath.Join(dir, "locked"), filepath.Join(dir, "latest")
 	command.run("locked pull", "pull", bundleRef, locked)
 	data, err := os.ReadFile(oldFile)

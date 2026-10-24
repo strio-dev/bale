@@ -6,27 +6,35 @@ Replace the registry names below with repositories you can access.
 
 ## Create a bundle
 
-Capture into a new local OCI layout and export its delivery paths:
+Resolve and lock the recipe into a new local metadata capture, then export its delivery paths:
 
 ```sh
-bale create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
+bale create -f bale.yaml ./release --output-delivery bale.delivery.yaml
 ```
 
-Use new paths for the layout and delivery file. Even with `--layout`, capture requires read access to the source registries. To store the bundle in a holding registry instead:
+Use new paths for the capture and delivery file. Creation reads manifests and dependency metadata, checks payload availability, and runs configured [discovery plugins](plugins.md). It does not download ordinary image configs or layers. Discovery may read charts and plugin packages.
+
+Keep the pinned source content available until you save an archive or push. To download a complete offline layout immediately, add `--layout`:
 
 ```sh
-bale create -f bale.yaml registry.example.com/bundles/release:v1
+bale create --layout -f bale.yaml ./offline
 ```
 
-Registry creation also requires write access to that holding repository; it does not publish members to their delivery paths. Both forms preserve the captured bytes and digests, include the complete graph, and run configured [discovery plugins](plugins.md).
+To store the bundle in a holding registry instead, choose `--registry`:
+
+```sh
+bale create --registry -f bale.yaml registry.example.com/bundles/release:v1
+```
+
+Registry creation requires write access to that holding repository and stores the complete graph there; it does not publish members to their delivery paths. All forms lock the same artifact digests.
 
 Preview the capture first with:
 
 ```sh
-bale create --layout -f bale.yaml ./preview --dry-run
+bale create -f bale.yaml ./preview --dry-run
 ```
 
-The preview reads source registries, resolves tags and runs configured discovery plugins without retaining or publishing a bundle. A later create resolves inputs again. Without `--layout`, a create preview also checks the holding registry for tag conflicts.
+The preview reads source registries, resolves tags and runs configured discovery plugins without retaining or publishing a bundle. A later create resolves inputs again. With `--registry`, a create preview also checks the holding registry for tag conflicts.
 
 ## Export delivery paths
 
@@ -74,7 +82,7 @@ bale push ./release mirror.example.com/releases/v1:bundle \
   --delivery bale.delivery.yaml
 ```
 
-The preview validates the local graph and shows publication locations without network access, credentials or plugin execution. Actual push checks destination access and existing tags.
+The preview validates local metadata and shows publication locations without network access, credentials or plugin execution. Complete layouts also receive full payload validation. For metadata captures, actual push reads missing content from pinned source digests and streams it to the destination, reusing existing blobs or registry mounts when available. It also checks destination access and existing tags; it never refreshes source tags or reruns plugins.
 
 Without a delivery file, source repository paths are preserved beneath the bundle repository, omitting the source registry hostname. For example, `ghcr.io/example/web` maps beneath `mirror.example.com/releases/v1:bundle` to `mirror.example.com/releases/v1/example/web`. Map a whole repository with repeatable `--map` options:
 

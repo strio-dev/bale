@@ -100,7 +100,17 @@ func checkLayoutDestination(layoutPath string) error {
 // writeLayout publishes one verified bundle closure in a new OCI layout. Source
 // content is copied into a sibling temporary directory; no partial layout is
 // exposed, and an existing destination is never replaced.
-func writeLayout(ctx context.Context, src content.Fetcher, root v1.Descriptor, layoutPath string, stats *Stats) (retErr error) {
+func writeLayout(ctx context.Context, src content.Fetcher, root v1.Descriptor, layoutPath string, stats *Stats) error {
+	return publishLocalLayout(ctx, layoutPath, root, func(store *oci.Storage, _ string) error {
+		if err := copyGraph(ctx, src, store, root, stats, nil); err != nil {
+			return err
+		}
+		_, err := bundle.LoadSnapshotGraph(ctx, store, root)
+		return err
+	})
+}
+
+func publishLocalLayout(ctx context.Context, layoutPath string, root v1.Descriptor, write func(*oci.Storage, string) error) (retErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -124,10 +134,7 @@ func writeLayout(ctx context.Context, src content.Fetcher, root v1.Descriptor, l
 	if err != nil {
 		return err
 	}
-	if err := copyGraph(ctx, src, store, root, stats, nil); err != nil {
-		return err
-	}
-	if _, err := bundle.LoadSnapshotGraph(ctx, store, root); err != nil {
+	if err := write(store, temp); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(v1.ImageLayout{Version: v1.ImageLayoutVersion})
@@ -137,7 +144,6 @@ func writeLayout(ctx context.Context, src content.Fetcher, root v1.Descriptor, l
 	if err := os.WriteFile(filepath.Join(temp, "oci-layout"), raw, 0644); err != nil {
 		return err
 	}
-	// Exactly one completion descriptor, written only after closure validation.
 	raw, err = json.Marshal(v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex, Manifests: []v1.Descriptor{root}})
 	if err != nil {
 		return err
@@ -155,31 +161,39 @@ func writeLayout(ctx context.Context, src content.Fetcher, root v1.Descriptor, l
 	return nil
 }
 
-func openLayout(ctx context.Context, path string) (*oci.Storage, bundle.Snapshot, error) {
+func readLayoutRoot(path string) (*oci.Storage, v1.Descriptor, error) {
 	raw, err := os.ReadFile(filepath.Join(path, "oci-layout"))
 	if err != nil {
-		return nil, bundle.Snapshot{}, err
+		return nil, v1.Descriptor{}, err
 	}
 	var layout v1.ImageLayout
 	if err := json.Unmarshal(raw, &layout); err != nil || layout.Version != v1.ImageLayoutVersion {
-		return nil, bundle.Snapshot{}, fmt.Errorf("invalid OCI layout")
+		return nil, v1.Descriptor{}, fmt.Errorf("invalid OCI layout")
 	}
 	raw, err = os.ReadFile(filepath.Join(path, "index.json"))
 	if err != nil {
-		return nil, bundle.Snapshot{}, err
+		return nil, v1.Descriptor{}, err
 	}
 	var index v1.Index
 	if err := json.Unmarshal(raw, &index); err != nil {
-		return nil, bundle.Snapshot{}, err
+		return nil, v1.Descriptor{}, err
 	}
 	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
-		return nil, bundle.Snapshot{}, fmt.Errorf("layout must contain exactly one bundle root")
+		return nil, v1.Descriptor{}, fmt.Errorf("layout must contain exactly one bundle root")
 	}
 	store, err := oci.NewStorage(path)
 	if err != nil {
+		return nil, v1.Descriptor{}, err
+	}
+	return store, index.Manifests[0], nil
+}
+
+func openLayout(ctx context.Context, path string) (*oci.Storage, bundle.Snapshot, error) {
+	store, root, err := readLayoutRoot(path)
+	if err != nil {
 		return nil, bundle.Snapshot{}, err
 	}
-	snapshot, err := bundle.LoadSnapshotGraph(ctx, store, index.Manifests[0])
+	snapshot, err := bundle.LoadSnapshotGraph(ctx, store, root)
 	if err != nil {
 		return nil, bundle.Snapshot{}, err
 	}

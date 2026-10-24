@@ -25,7 +25,7 @@ Usage:
   bale [command]
 
 Available Commands:
-  create        Capture a recipe as a registry bundle or local OCI layout
+  create        Resolve a recipe into a local metadata capture
   delivery      Update delivery paths for a refreshed bundle
   dependencies  Generate, attach, list, and inspect dependency declarations
   destinations  Inspect delivered artifact destination records
@@ -56,7 +56,7 @@ type commandOptions struct {
 	archiveInput, archiveOutput            string
 	dryRun, help                           bool
 	formatSet                              bool
-	layout, quiet                          bool
+	layout, registry, quiet                bool
 	plainHTTP, maps                        stringsFlag
 	args                                   []string
 	pluginModule, pluginInput, pluginCache string
@@ -75,7 +75,7 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 	fs.BoolVar(&opts.help, "help", false, "help")
 	fs.BoolVar(&opts.help, "h", false, "help")
 	allowed := map[string]bool{"help": false, "h": false}
-	if command != "save" && command != "load" {
+	if command != "load" {
 		fs.Var(&opts.plainHTTP, "plain-http", "registry allowed to use HTTP")
 		allowed["plain-http"] = true
 	}
@@ -101,11 +101,13 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 			break
 		}
 		fs.BoolVar(&opts.dryRun, "dry-run", false, "resolve without publication")
-		fs.BoolVar(&opts.layout, "layout", false, "capture into a local OCI directory")
+		fs.BoolVar(&opts.layout, "layout", false, "download a complete local OCI directory")
+		fs.BoolVar(&opts.registry, "registry", false, "capture into a registry repository")
 		fs.StringVar(&opts.outputDelivery, "output-delivery", "", "write delivery YAML")
 		allowed["output-delivery"] = true
 		allowed["dry-run"] = false
 		allowed["layout"] = false
+		allowed["registry"] = false
 	case "save":
 		fs.StringVar(&opts.archiveOutput, "output", "", "new OCI tar archive")
 		fs.StringVar(&opts.archiveOutput, "o", "", "new OCI tar archive")
@@ -213,6 +215,9 @@ func parseCommand(command string, args []string) (commandOptions, error) {
 	}
 	if err := fs.Parse(flags); err != nil {
 		return opts, err
+	}
+	if opts.layout && opts.registry {
+		return opts, fmt.Errorf("--layout and --registry cannot be combined")
 	}
 	if seen["output-delivery"] && opts.outputDelivery == "" {
 		return opts, fmt.Errorf("--output-delivery requires a nonempty path")
@@ -418,7 +423,7 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if command == "push" {
 		ref = opts.args[1]
 	}
-	if command != "create" || !opts.layout {
+	if command != "create" || opts.registry {
 		if err := explicitReference(ref, command != "pull"); err != nil {
 			return fail(errOut, err)
 		}
@@ -465,10 +470,13 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 			if err == nil {
 				var created bale.CreateResult
 				createOptions := bale.CreateOptions{DryRun: opts.dryRun, ExportDelivery: deliveryOutput != nil}
-				if opts.layout {
-					created, err = service.CreateLayout(ctx, recipe, ref, createOptions)
-				} else {
+				switch {
+				case opts.registry:
 					created, err = service.Create(ctx, recipe, ref, createOptions)
+				case opts.layout:
+					created, err = service.CreateLayout(ctx, recipe, ref, createOptions)
+				default:
+					created, err = service.CreateLocal(ctx, recipe, ref, createOptions)
 				}
 				result, resultDigest = created, created.Descriptor.Digest.String()
 				if err == nil && deliveryOutput != nil {

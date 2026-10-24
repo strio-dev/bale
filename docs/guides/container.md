@@ -18,7 +18,7 @@ Save the [first-bundle recipe](../tutorials/first-bundle.md#write-a-recipe) as `
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
   -v "$PWD:/work:Z" -v bale-cache:/cache \
   ghcr.io/strio-dev/bale:latest \
-  create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
+  create -f bale.yaml ./release --output-delivery bale.delivery.yaml
 ```
 
 The mounts have two purposes:
@@ -26,7 +26,7 @@ The mounts have two purposes:
 - `$PWD:/work:Z` makes the project writable inside the container. Outputs have your host ownership; `:Z` supplies an SELinux label.
 - `bale-cache:/cache` retains compiled discovery plugins between runs. This mount is optional; keep the cache private to one effective user.
 
-Bale needs no privileged mode, container socket or nested runtime. Plugins run inside Bale.
+Creation locks metadata locally; save or push reads missing content from the pinned sources. Bale needs no privileged mode, container socket or nested runtime. Plugins run inside Bale.
 
 ## Save, restore and deliver
 
@@ -43,7 +43,7 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
   --delivery bale.delivery.yaml --dry-run
 ```
 
-Use new output paths. Replace the destination, configure credentials below, then remove `--dry-run` to publish. See [offline packaging](../offline.md) to move the archive between machines.
+Keep source access available until save finishes. Use new output paths. Replace the destination, configure credentials below, then remove `--dry-run` to publish. See [offline packaging](../offline.md) to move the archive between machines.
 
 ## Registry credentials
 
@@ -57,7 +57,7 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
   push ./restored mirror.example.com/release:bundle --delivery bale.delivery.yaml
 ```
 
-The example expects `$HOME/.config/bale/registry-auth/config.json`. The image has no credential helpers, so the file must contain usable credentials. Keep it outside bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. See [registry access](../registry.md#authentication-and-transport).
+Use the same credential mount for creation or save when the source registries are private. The example expects `$HOME/.config/bale/registry-auth/config.json`. The image has no credential helpers, so the file must contain usable credentials. Keep it outside bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. See [registry access](../registry.md#authentication-and-transport).
 
 ## Docker
 

@@ -231,9 +231,22 @@ func (c *Client) CreateLayout(ctx context.Context, recipe Recipe, layoutPath str
 	return c.service.CreateLayout(ctx, normalized, layoutPath, options)
 }
 
-// Save writes a verified bundle layout to a new, deterministic OCI tar archive.
-// It preserves the bundle digest and leaves the source directory unchanged.
-// Save makes no network requests and does not execute plugins.
+// CreateLocal locks a recipe into a source-dependent local metadata capture.
+// It retains manifests and interpreted metadata without downloading ordinary
+// image payloads. Discovery may read chart or plugin bytes. Save or Push reads
+// missing payloads by pinned digest; neither refreshes tags nor runs plugins.
+func (c *Client) CreateLocal(ctx context.Context, recipe Recipe, path string, options CreateOptions) (CreateResult, error) {
+	normalized, err := NormalizeRecipe(recipe)
+	if err != nil {
+		return CreateResult{}, err
+	}
+	return c.service.CreateLocal(ctx, normalized, path, options)
+}
+
+// Save writes a verified bundle to a new, deterministic OCI tar archive.
+// Metadata-only captures fetch missing payloads from their pinned sources;
+// complete layouts are saved offline. The source is unchanged, the bundle
+// digest is preserved, and plugins are never executed.
 func (c *Client) Save(ctx context.Context, layoutPath, archivePath string) (ArchiveResult, error) {
 	return c.service.Save(ctx, layoutPath, archivePath)
 }
@@ -334,8 +347,9 @@ func (c *Client) Inspect(ctx context.Context, reference string) (InspectResult, 
 	return c.service.Inspect(ctx, reference)
 }
 
-// InspectLayout verifies a completed local OCI bundle layout without network
-// access or writes, including when the supplied path is invalid.
+// InspectLayout verifies local bundle content without network access or writes.
+// Marked metadata-only captures verify their interpreted graph and report
+// MetadataOnly; complete layouts additionally verify every payload.
 func (c *Client) InspectLayout(ctx context.Context, layoutPath string) (InspectResult, error) {
 	return c.service.InspectLayout(ctx, layoutPath)
 }

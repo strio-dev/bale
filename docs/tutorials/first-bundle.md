@@ -20,17 +20,17 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-Bale resolves the tag to a digest and includes its platform images.
+Bale resolves the tag and its platform images to digests without downloading their image layers.
 
 ## Capture and inspect
 
 ```sh
-bale create --layout -f bale.yaml ./release \
+bale create -f bale.yaml ./release \
   --output-delivery bale.delivery.yaml
 bale inspect --layout ./release -f '{{.Descriptor.Digest}}'
 ```
 
-Both commands print the same bundle digest. `release/` contains the captured content; `bale.delivery.yaml` lists its publication paths.
+Both commands print the same bundle digest. `release/` contains the locked metadata; `bale.delivery.yaml` lists publication paths. Keep access to Docker Hub until saving or pushing the bundle.
 
 View the full JSON inventory with:
 
@@ -38,7 +38,7 @@ View the full JSON inventory with:
 bale inspect --layout ./release
 ```
 
-The [inspection guide](../inspection.md) explains the report and formatting options.
+The report marks this capture with `metadataOnly: true`. The [inspection guide](../inspection.md) explains its validation and formatting options.
 
 ## Save and restore
 
@@ -49,7 +49,7 @@ bale inspect --layout ./restored -f '{{.Descriptor.Digest}}'
 bale diff --layout ./release ./restored
 ```
 
-The restored digest matches the original, and diff reports `Bundle changed: false`. Save and load work offline and store shared content once by digest. Carry `release.tar` to another machine and restore it there the same way.
+Save downloads the pinned payloads and writes a complete archive. Load works offline. The restored digest matches the original, and diff reports `Bundle changed: false`. Shared content is stored once by digest. Carry `release.tar` to another machine and restore it there the same way.
 
 Output paths must not already exist; an empty directory is rejected too. Use a new working directory when repeating the tutorial.
 

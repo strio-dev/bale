@@ -18,7 +18,12 @@ func writePushPreview(out io.Writer, plan bale.DeliveryPlan) error {
 	fmt.Fprintln(&buffer, "Dry run: nothing published.")
 	fmt.Fprintf(&buffer, "Bundle: %s\n", plan.Descriptor.Digest)
 	fmt.Fprintf(&buffer, "Completion tag: %s\n", plan.Destination)
-	fmt.Fprintln(&buffer, "Local captured content validated; destination availability, authentication and existing tags not checked.")
+	if plan.MetadataOnly {
+		fmt.Fprintln(&buffer, "Local captured metadata validated; actual push needs source access for missing payloads.")
+		fmt.Fprintln(&buffer, "Source payload availability, destination availability, authentication and existing tags not checked.")
+	} else {
+		fmt.Fprintln(&buffer, "Local captured content validated; destination availability, authentication and existing tags not checked.")
+	}
 	fmt.Fprintln(&buffer, "Copy roots include complete OCI graphs. The bundle capture is also copied to the completion repository.")
 	fmt.Fprintln(&buffer, "Primary relocations do not remove copies required by unchanged graph references.")
 

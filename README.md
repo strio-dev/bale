@@ -20,10 +20,10 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-Capture the image and save an offline archive:
+Lock the image references, then download an offline archive:
 
 ```sh
-bale create --layout -f bale.yaml ./release
+bale create -f bale.yaml ./release
 bale save ./release -o release.tar
 ```
 

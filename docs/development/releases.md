@@ -41,7 +41,7 @@ Replace the selector and destination for each artifact:
 | `bale-flux` | `registry.example.com/images/bale-flux:dev` |
 | `bale-flux-chart` | `oci://registry.example.com/charts` |
 
-OCI publication uses ORAS copy options, including `--to-registry-config` and `--to-ca-file`. Chart publication uses Helm options such as `--ca-file`; Helm appends the chart name and version. The native plugin's repository name must end in `bale`, and its tag must identify the deployment architecture.
+OCI publication uses ORAS copy options, including `--to-registry-config` and `--to-ca-file`. Chart publication uses Helm options such as `--ca-file`; Helm appends the chart name and version. The native plugin's repository name must end in `bale`. Use an architecture-specific tag for each native build.
 
 ## Release a version
 

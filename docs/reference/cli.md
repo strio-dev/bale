@@ -46,7 +46,7 @@ On failed `create`, `pull` or `push`, explicit JSON output can retain a result d
 
 Full bundle inspection, local delivery-file export and push validate complete captured content. Diff, delivery update and registry delivery-file export read verified metadata without checking opaque payload availability. Destination inspection validates its attached metadata without following recorded locations.
 
-`create --dry-run` contacts source registries and runs configured discovery plugins to resolve the inventory. It does not publish a bundle. `push --dry-run` validates the local graph and computes paths without registry access; it does not check destination credentials, availability or tag conflicts.
+`create --dry-run` resolves source content and runs configured discovery plugins. Registry creation also reads the holding registry to check tag conflicts; local `--layout` preview needs no holding registry. Neither form publishes a bundle. `push --dry-run` validates the local graph and computes paths without registry access; it does not check destination credentials, availability or tag conflicts.
 
 ## Credentials and transport
 

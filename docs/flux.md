@@ -32,7 +32,9 @@ releases:
       context: production
 ```
 
-Each entry needs one matching local destination attachment and captured dependency resolution. Use the [capture selectors](reference/helm-discovery.md#select-a-capture) when several match. Requests cannot change this allowlist or combine captures.
+Use a distinct release name of at most 63 lowercase letters, digits or hyphens, beginning and ending with a letter or digit. Each chart reference needs an explicit tag or digest and one matching local destination attachment and captured dependency resolution. Use the [capture selectors](reference/helm-discovery.md#select-a-capture) when several match. Requests cannot change this allowlist or combine captures.
+
+The configuration accepts one YAML document and rejects unknown fields, duplicate keys, nulls, anchors and aliases. String values must be nonempty and have no surrounding whitespace.
 
 Copy the [bootstrap values](examples/flux-bootstrap/values.yaml) to `values.yaml`. Set the service image's destination repository and tag. Create `flux-system` if needed and provision the [credentials and TLS Secrets](#private-registry-configuration), then install:
 

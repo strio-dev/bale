@@ -79,4 +79,4 @@ References resolve during bundle creation. For local development, use `--plugin-
 
 ## Runtime and cache boundaries
 
-Plugins exchange JSON over WASI streams without host filesystem, environment or network access. Bale uses Wago; Helm Extism modules use a different execution contract. See [runtime settings and limits](reference/plugin-runtime.md#runtime-and-cache-boundaries) for cache, memory and timeout options.
+Plugins exchange JSON over WASI streams without host filesystem, environment or network access. Bale uses Wago. See [runtime settings and limits](reference/plugin-runtime.md#runtime-and-cache-boundaries) for cache, memory and timeout options.

@@ -12,13 +12,13 @@ Capture into a new local OCI layout and export its delivery paths:
 bale create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
 ```
 
-This requires read access to the sources. To store the bundle in a registry instead:
+Use new paths for the layout and delivery file. Even with `--layout`, capture requires read access to the source registries. To store the bundle in a holding registry instead:
 
 ```sh
 bale create -f bale.yaml registry.example.com/bundles/release:v1
 ```
 
-Both forms preserve the captured bytes and digests, include the complete graph, and run configured [discovery plugins](plugins.md).
+Registry creation also requires write access to that holding repository; it does not publish members to their delivery paths. Both forms preserve the captured bytes and digests, include the complete graph, and run configured [discovery plugins](plugins.md).
 
 Preview the capture first with:
 
@@ -26,7 +26,7 @@ Preview the capture first with:
 bale create --layout -f bale.yaml ./preview --dry-run
 ```
 
-The preview resolves tags and runs discovery without retaining or publishing a bundle. A later create resolves inputs again.
+The preview reads source registries, resolves tags and runs configured discovery plugins without retaining or publishing a bundle. A later create resolves inputs again. Without `--layout`, a create preview also checks the holding registry for tag conflicts.
 
 ## Export delivery paths
 
@@ -76,7 +76,7 @@ bale push ./release mirror.example.com/releases/v1:bundle \
 
 The preview validates the local graph and shows publication locations without network access, credentials or plugin execution. Actual push checks destination access and existing tags.
 
-Without a delivery file, source repository paths are preserved beneath the bundle repository. Map a whole repository with repeatable `--map` options:
+Without a delivery file, source repository paths are preserved beneath the bundle repository, omitting the source registry hostname. For example, `ghcr.io/example/web` maps beneath `mirror.example.com/releases/v1:bundle` to `mirror.example.com/releases/v1/example/web`. Map a whole repository with repeatable `--map` options:
 
 ```sh
 bale push ./release mirror.example.com/releases/v1:bundle \

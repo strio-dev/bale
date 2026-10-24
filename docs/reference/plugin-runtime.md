@@ -98,7 +98,7 @@ type: dependency/v1
 runtime: wasi/preview1
 ```
 
-The package contains one directory named after the plugin, with `plugin.yaml` and the fixed module path `plugin.wasm`. Add your `LICENSE` and applicable third-party license and notice files to that directory before packaging.
+The package contains one directory named after the plugin, with `plugin.yaml` and the fixed module path `plugin.wasm`. All five metadata fields are required; unknown or duplicate fields, aliases and extra YAML documents are rejected. `name` starts with an ASCII letter or digit and contains only ASCII letters, digits, `_` and `-`. `version` is strict SemVer, such as `1.0.0` or `1.0.0-rc.1`; the resulting `name-version.tgz` title must fit in 255 bytes. Add your `LICENSE` and applicable third-party license and notice files to that directory before packaging.
 
 From a Bale checkout, use the pinned archive tools and publish the result:
 
@@ -108,9 +108,11 @@ nix develop --no-update-lock-file path:.#release --command \
 bale plugins push -f references-1.0.0.tgz registry.example.com/plugins/references:1
 ```
 
-The package uses Helm's archive-inside-OCI pattern with Bale's execution metadata. Its OCI artifact type is `application/vnd.bale.plugin.v1+json`, with an empty config and one gzip archive layer. Publication preserves the package bytes, including license files; bundles retain the selected graph, including an index when present. Bale validates the package and runs its module directly. Helm's installer does not support this runtime.
+`bale plugins push` accepts the packaged `.tgz`, not a raw Wasm module. It publishes OCI artifact type `application/vnd.bale.plugin.v1+json`, with an empty JSON config and one `application/vnd.oci.image.layer.v1.tar+gzip` archive layer. The layer title is `name-version.tgz`. Publication preserves the package bytes, including license files. Bale validates the package and runs its module directly; Helm's installer does not support this runtime.
 
-The archive is limited to 256 MiB in compressed and expanded form; the module remains limited to 128 MiB. Metadata, file counts and archive paths are also bounded and validated. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
+For existing registry artifacts, Bale also accepts an optional second provenance layer titled `name-version.tgz.prov`. It verifies the bytes without treating them as a trusted signature. An OCI index must select exactly one manifest with platform `wasm/wasip1`; the bundle retains the complete selected graph, including the index.
+
+The archive is limited to 256 MiB in both compressed and expanded form, with at most 4,096 logical entries. `plugin.yaml`, OCI metadata and optional provenance are each limited to 4 MiB; the module remains limited to 128 MiB. Archive paths are limited to 4,096 bytes. Entries must be regular files or directories under the package root: links, special files, unsafe or duplicate paths, setuid/setgid permissions and trailing archive content are rejected. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
 
 ## Runtime and cache boundaries
 
@@ -126,7 +128,7 @@ Create, authorized latest pull and manual generation accept these settings:
 
 Helm's [`extism/v1` runtime](https://github.com/helm/helm/blob/v4.3.0/internal/plugin/runtime_extismv1.go) uses a different entry point and host APIs. Bale's discovery modules are not interchangeable with Helm Extism plugins. The native Bale Helm consumer uses Helm's `postrenderer/v1` subprocess contract instead.
 
-Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Distribute the portable plugin package instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Insecure or corrupt cache entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
+Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Distribute the portable plugin package instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Cache entries must be regular files owned by the current user with mode `0600`; insecure or corrupt entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
 
 Disk caching requires supported Unix ownership and no-follow file operations. On other platforms, leave `CacheDirectory` empty or pass `--plugin-cache ''`.
 

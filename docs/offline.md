@@ -36,7 +36,7 @@ bale push ./restored mirror.example.com/releases/v1:bundle \
   --delivery bale.delivery.yaml --dry-run
 ```
 
-Load validates the archive and complete graph before creating the new layout. Save, load and preview work offline.
+Use paths that do not already exist for the archive, restored layout and exported delivery file. Load validates the archive and complete graph before publishing the new layout. Save, load, local inspection and push preview work offline.
 
 Replace the destination and configure [registry credentials](registry.md#authentication-and-transport), then publish and verify:
 

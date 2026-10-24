@@ -10,7 +10,7 @@ A Bale bundle captures OCI artifacts and the content they need. Create the bundl
 | Bundle | Retain captured manifests, blobs, the recipe and resolved dependencies. |
 | Delivery file | Choose publication paths for one captured snapshot. |
 
-Creation resolves mutable tags and captures the full OCI graph, including image platforms. It follows selected dependency declarations and runs configured discovery plugins. Later source-tag changes leave that snapshot unchanged.
+Creation resolves mutable tags and captures the full OCI graph, including image platforms and nested bundles. It follows selected dependency declarations and runs configured discovery plugins. Disabling optional referrer discovery or dependency following leaves required OCI descriptor edges intact. Later source-tag changes leave that snapshot unchanged.
 
 A [delivery file](../transfers.md#export-delivery-paths) changes member paths at push time. It cannot add inputs or change captured bytes. Export one during creation or from an existing bundle.
 

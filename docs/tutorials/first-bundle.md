@@ -4,7 +4,7 @@ Capture BusyBox from Docker Hub, save it as an archive, then restore it offline.
 
 ## Before you start
 
-[Install Bale](../getting-started.md). You need access to Docker Hub, disk space for the image and an empty working directory. Capture needs neither a container runtime nor a writable registry.
+[Install Bale](../getting-started.md). You need access to Docker Hub and disk space for the image. The next step creates a working directory. Capture needs neither a container runtime nor a writable registry.
 
 ## Write a recipe
 
@@ -51,7 +51,7 @@ bale diff --layout ./release ./restored
 
 The restored digest matches the original, and diff reports `Bundle changed: false`. Save and load work offline and store shared content once by digest. Carry `release.tar` to another machine and restore it there the same way.
 
-Layouts, archives and delivery files require new output paths. Use different names when repeating the tutorial.
+Output paths must not already exist; an empty directory is rejected too. Use a new working directory when repeating the tutorial.
 
 ## Preview delivery
 

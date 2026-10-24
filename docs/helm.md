@@ -74,7 +74,7 @@ Use an explicit chart tag or digest:
 helm bale template web oci://mirror.example.com/release/charts/web:1.4 \
   --namespace production
 helm bale upgrade web oci://mirror.example.com/release/charts/web:1.4 \
-  --install --namespace production --wait
+  --install --namespace production --create-namespace --wait
 ```
 
 Put Helm flags after the chart. Pass deployment values with `--values`, using destination references for custom images. The plugin resolves and pins the chart, reads its destination records, then relocates rendered image references. It uses Helm's post-renderer slot, so an additional `--post-renderer` is unsupported.
@@ -93,7 +93,7 @@ helm registry login mirror.example.com --username deploy \
 helm plugin install oci://mirror.example.com/release/plugins/bale:0.0.0-linux-amd64 \
   --verify=false --ca-file registry-ca.crt
 helm bale upgrade web oci://mirror.example.com/release/charts/web:1.4 \
-  --install --namespace production --wait --ca-file registry-ca.crt
+  --install --namespace production --create-namespace --wait --ca-file registry-ca.crt
 ```
 
 Keep both credential-location variables aligned: Helm 4.3.0's plugin installer does not honor a custom `--registry-config` alone. Workload pulls need separate Kubernetes credentials and node CA trust; see [private registry configuration](flux.md#private-registry-configuration).
@@ -104,7 +104,7 @@ When several captures match a chart, choose one with selectors before the action
 
 ```sh
 helm bale --context production upgrade web \
-  oci://mirror.example.com/release/charts/web:1.4 --install --namespace production
+  oci://mirror.example.com/release/charts/web:1.4 --install --namespace production --create-namespace
 ```
 
 See the [consumer reference](reference/helm-discovery.md#select-a-capture) for all selectors and validation rules.

@@ -124,7 +124,7 @@ Place selectors before the action. Selection never chooses the newest attachment
 
 The renderer handles the [workloads supported by discovery](helm-discovery.md#image-inventory), including hooks, init containers, ephemeral containers and nested Lists. It replaces mapped source selectors with pinned destination references and leaves valid unmapped references unchanged. Custom resource fields need a consumer that understands their schema.
 
-Malformed workloads, invalid images and invalid metadata fail without partial YAML. Anchors, aliases and merge keys on paths requiring mutation are rejected.
+Malformed workloads, invalid images and invalid metadata fail without partial YAML. Anchors, aliases and merge keys on supported workload paths are rejected, even when an image has no mapping.
 
 | Input or output | Limit |
 | --- | --- |

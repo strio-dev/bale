@@ -1,5 +1,5 @@
-// Package pluginoci reads and writes portable WASI command modules using the
-// CNCF Wasm OCI image profile. It does not interpret compiled runtime caches.
+// Package pluginoci reads and writes archive-based OCI discovery plugins.
+// Distribution packaging is independent of the portable WASIp1 execution ABI.
 package pluginoci
 
 import (
@@ -13,26 +13,20 @@ import (
 	"path/filepath"
 
 	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 )
 
 const (
-	MediaTypeConfig  = "application/vnd.wasm.config.v0+json"
-	MediaTypeModule  = "application/wasm"
+	ArtifactType     = "application/vnd.bale.plugin.v1+json"
 	MaxModuleBytes   = 128 << 20
 	MaxMetadataBytes = 4 << 20
+	MaxArchiveBytes  = 256 << 20
 )
 
 var coreHeader = []byte{0, 'a', 's', 'm', 1, 0, 0, 0}
-
-type moduleConfig struct {
-	Architecture string          `json:"architecture"`
-	OS           string          `json:"os"`
-	LayerDigests []digest.Digest `json:"layerDigests"`
-}
 
 // Module owns a verified, private temporary copy of a portable module.
 type Module struct {
@@ -48,8 +42,9 @@ func (m *Module) Close() error {
 	return os.RemoveAll(m.dir)
 }
 
-// Open selects exactly one wasm/wasip1 manifest and verifies its profile and
-// module content. Callers retain responsibility for preserving the root graph.
+// Open selects one wasm/wasip1 package, verifies its metadata and archive, and
+// materializes only plugin.wasm. It never executes package metadata as commands.
+// Callers retain responsibility for preserving the original root graph.
 func Open(ctx context.Context, store content.ReadOnlyStorage, descriptor v1.Descriptor) (_ *Module, err error) {
 	if store == nil {
 		return nil, errors.New("plugin storage is required")
@@ -94,32 +89,36 @@ func Open(ctx context.Context, store content.ReadOnlyStorage, descriptor v1.Desc
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("plugin manifest: %w", err)
 	}
-	if manifest.SchemaVersion != 2 {
-		return nil, errors.New("unsupported plugin manifest envelope")
+	if manifest.SchemaVersion != 2 || manifest.Subject != nil || manifest.ArtifactType != ArtifactType {
+		return nil, errors.New("unsupported discovery plugin manifest")
 	}
-	if manifest.Config.MediaType != MediaTypeConfig {
-		return nil, fmt.Errorf("unsupported plugin config media type %q", manifest.Config.MediaType)
+	if manifest.Config.MediaType != v1.MediaTypeEmptyJSON {
+		return nil, errors.New("plugin requires an empty OCI config")
 	}
-	if len(manifest.Layers) != 1 || manifest.Layers[0].MediaType != MediaTypeModule {
-		return nil, errors.New("plugin requires exactly one application/wasm layer")
-	}
-	blob := manifest.Layers[0]
-	if err := validateDescriptor(blob, MaxModuleBytes); err != nil {
-		return nil, fmt.Errorf("plugin module: %w", err)
-	}
-	data, err = fetchMetadata(ctx, store, manifest.Config)
+	config, err := fetchMetadata(ctx, store, manifest.Config)
 	if err != nil {
 		return nil, err
 	}
-	var config moduleConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("plugin config: %w", err)
+	if !bytes.Equal(config, []byte("{}")) {
+		return nil, errors.New("plugin config must be the empty JSON object")
 	}
-	if config.Architecture != "wasm" || config.OS != "wasip1" {
-		return nil, errors.New("plugin config requires architecture wasm and os wasip1")
+	if len(manifest.Layers) < 1 || len(manifest.Layers) > 2 || manifest.Layers[0].MediaType != v1.MediaTypeImageLayerGzip {
+		return nil, errors.New("plugin requires one gzip package and optional provenance")
 	}
-	if len(config.LayerDigests) != 1 || config.LayerDigests[0] != blob.Digest {
-		return nil, errors.New("plugin config layerDigests must match manifest layers in order")
+	archive := manifest.Layers[0]
+	if err := validateDescriptor(archive, MaxArchiveBytes); err != nil {
+		return nil, fmt.Errorf("plugin archive: %w", err)
+	}
+	title := archive.Annotations[v1.AnnotationTitle]
+	if len(manifest.Layers) == 2 {
+		provenance := manifest.Layers[1]
+		if title == "" || provenance.Annotations[v1.AnnotationTitle] != title+".prov" {
+			return nil, errors.New("plugin provenance title must match its package")
+		}
+		// Verify sidecar bytes, without interpreting them as a trusted signature.
+		if _, err := fetchMetadata(ctx, store, provenance); err != nil {
+			return nil, fmt.Errorf("plugin provenance: %w", err)
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -138,43 +137,29 @@ func Open(ctx context.Context, store content.ReadOnlyStorage, descriptor v1.Desc
 	if err != nil {
 		return nil, err
 	}
-	var reader io.ReadCloser
-	if blob.Data != nil {
-		reader = io.NopCloser(bytes.NewReader(blob.Data))
-	} else {
-		reader, err = store.Fetch(ctx, blob)
-		if err != nil {
-			_ = file.Close()
-			return nil, err
-		}
-	}
-	verified := content.NewVerifyReader(contextReader{ctx, reader}, blob)
-	_, copyErr := io.Copy(file, verified)
-	verifyErr := verified.Verify()
-	readCloseErr := reader.Close()
-	closeErr := file.Close()
-	if err := errors.Join(copyErr, verifyErr, readCloseErr, closeErr); err != nil {
-		return nil, fmt.Errorf("plugin module: %w", err)
-	}
-	file, err = os.Open(module.Path)
+	reader, err := fetchReader(ctx, store, archive)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, file.Close())
 	}
-	err = checkHeader(file)
-	err = errors.Join(err, file.Close())
+	verified := content.NewVerifyReader(contextReader{ctx, reader}, archive)
+	metadata, scanErr := readArchive(ctx, verified, file)
+	if scanErr == nil && metadata.title() != title {
+		scanErr = errors.New("plugin archive title does not match package name and version")
+	}
+	err = errors.Join(scanErr, verified.Verify(), reader.Close(), file.Close())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("plugin archive: %w", err)
 	}
 	return module, nil
 }
 
-// Pack writes a deterministic OCI image containing one portable WASIp1 module.
-// The caller owns storage and publication of the resulting manifest.
-func Pack(ctx context.Context, store content.Storage, modulePath string) (v1.Descriptor, error) {
+// Pack publishes an existing discovery .tgz unchanged using OCI archive layers.
+// Package creation is owned by build tooling, not by this transport codec.
+func Pack(ctx context.Context, store content.Storage, packagePath string) (v1.Descriptor, error) {
 	if store == nil {
 		return v1.Descriptor{}, errors.New("plugin storage is required")
 	}
-	file, err := os.Open(modulePath)
+	file, err := os.Open(packagePath)
 	if err != nil {
 		return v1.Descriptor{}, err
 	}
@@ -183,24 +168,15 @@ func Pack(ctx context.Context, store content.Storage, modulePath string) (v1.Des
 	if err != nil {
 		return v1.Descriptor{}, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > MaxModuleBytes || info.Size() < int64(len(coreHeader)) {
-		return v1.Descriptor{}, errors.New("plugin must be a regular core Wasm module of at most 128 MiB")
-	}
-	if err := checkHeader(file); err != nil {
-		return v1.Descriptor{}, err
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return v1.Descriptor{}, err
+	if !info.Mode().IsRegular() || info.Size() > MaxArchiveBytes || info.Size() < 1 {
+		return v1.Descriptor{}, errors.New("plugin package must be a regular gzip archive of at most 256 MiB")
 	}
 	digester := digest.SHA256.Digester()
-	n, err := io.Copy(digester.Hash(), io.LimitReader(contextReader{ctx, file}, info.Size()+1))
+	metadata, err := readArchive(ctx, io.TeeReader(file, digester.Hash()), io.Discard)
 	if err != nil {
-		return v1.Descriptor{}, err
+		return v1.Descriptor{}, fmt.Errorf("plugin package: %w", err)
 	}
-	if n != info.Size() {
-		return v1.Descriptor{}, errors.New("plugin file changed while hashing")
-	}
-	blob := v1.Descriptor{MediaType: MediaTypeModule, Digest: digester.Digest(), Size: n}
+	blob := v1.Descriptor{MediaType: v1.MediaTypeImageLayerGzip, Digest: digester.Digest(), Size: info.Size(), Annotations: map[string]string{v1.AnnotationTitle: metadata.title()}}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return v1.Descriptor{}, err
 	}
@@ -209,31 +185,28 @@ func Pack(ctx context.Context, store content.Storage, modulePath string) (v1.Des
 	if pushErr != nil && !errors.Is(pushErr, errdef.ErrAlreadyExists) {
 		return v1.Descriptor{}, pushErr
 	}
-	// A store may skip an existing blob without reading the source. Verify the
-	// remaining bytes even in that case, detecting modifications after hashing.
+	// Stores may skip existing blobs without reading. Verify the remaining source
+	// as well, detecting mutation between validation/hashing and publication.
 	if _, err := io.Copy(io.Discard, verified); err != nil {
 		return v1.Descriptor{}, err
 	}
 	if err := verified.Verify(); err != nil {
-		return v1.Descriptor{}, fmt.Errorf("plugin file changed while packing: %w", err)
+		return v1.Descriptor{}, fmt.Errorf("plugin package changed while packing: %w", err)
 	}
-	config, err := pushJSON(ctx, store, MediaTypeConfig, moduleConfig{Architecture: "wasm", OS: "wasip1", LayerDigests: []digest.Digest{blob.Digest}})
-	if err != nil {
-		return v1.Descriptor{}, err
-	}
-	return pushJSON(ctx, store, v1.MediaTypeImageManifest, v1.Manifest{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageManifest, Config: config, Layers: []v1.Descriptor{blob}})
+	return oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, ArtifactType, oras.PackManifestOptions{
+		Layers:              []v1.Descriptor{blob},
+		ManifestAnnotations: map[string]string{v1.AnnotationCreated: "1970-01-01T00:00:01Z"},
+	})
 }
 
-func pushJSON(ctx context.Context, store content.Storage, mediaType string, value any) (v1.Descriptor, error) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return v1.Descriptor{}, err
+func fetchReader(ctx context.Context, store content.ReadOnlyStorage, desc v1.Descriptor) (io.ReadCloser, error) {
+	if desc.Data != nil {
+		return io.NopCloser(bytes.NewReader(desc.Data)), nil
 	}
-	desc := content.NewDescriptorFromBytes(mediaType, data)
-	if err := store.Push(ctx, desc, bytes.NewReader(data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
-		return v1.Descriptor{}, err
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return desc, nil
+	return store.Fetch(ctx, desc)
 }
 
 func validateDescriptor(desc v1.Descriptor, limit int64) error {
@@ -262,19 +235,7 @@ func fetchMetadata(ctx context.Context, store content.ReadOnlyStorage, desc v1.D
 	return content.FetchAll(ctx, store, desc)
 }
 
-func checkHeader(reader io.Reader) error {
-	var header [8]byte
-	if _, err := io.ReadFull(reader, header[:]); err != nil {
-		return fmt.Errorf("plugin core Wasm header: %w", err)
-	}
-	if !bytes.Equal(header[:], coreHeader) {
-		return errors.New("plugin requires a portable core Wasm module, not a component or native cache")
-	}
-	return nil
-}
-
-// OCI mediaType is optional in the JSON envelope because the descriptor already
-// supplies it. A present value still has to be a string consistent with it.
+// OCI permits omission of the envelope mediaType; a present value must agree.
 func validateEnvelopeMediaType(raw []byte, expected string) error {
 	var envelope struct {
 		MediaType json.RawMessage `json:"mediaType"`

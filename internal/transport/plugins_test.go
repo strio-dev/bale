@@ -18,13 +18,14 @@ import (
 	"github.com/strio-dev/bale/internal/config"
 	"github.com/strio-dev/bale/internal/dependency"
 	"github.com/strio-dev/bale/internal/pluginoci"
+	"github.com/strio-dev/bale/internal/wasmtest"
 	"oras.land/oras-go/v2/content"
 )
 
 func capturePluginFixture(t *testing.T, r *readRegistry) v1.Descriptor {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "plugin.wasm")
-	if err := os.WriteFile(path, []byte{'\x00', 'a', 's', 'm', 1, 0, 0, 0}, 0600); err != nil {
+	path := filepath.Join(t.TempDir(), "discovery-0.0.0.tgz")
+	if err := os.WriteFile(path, wasmtest.Package([]byte{'\x00', 'a', 's', 'm', 1, 0, 0, 0}), 0600); err != nil {
 		t.Fatal(err)
 	}
 	d, err := pluginoci.Pack(ctx, r.store, path)

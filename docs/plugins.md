@@ -1,6 +1,6 @@
 # Dependency plugins
 
-Run a registry-hosted discovery plugin during bundle creation to find an artifact's dependencies. Bale captures the portable Wasm module, resolved digest, generated [declaration](dependencies.md) and dependency graphs together.
+Run a registry-hosted discovery plugin during bundle creation to find an artifact's dependencies. Bale captures the plugin package, resolved digest, generated [declaration](dependencies.md) and dependency graphs together.
 
 For chart discovery and deployment, follow the [Helm guide](helm.md). To write a plugin, use the [WASI protocol and Go example](reference/plugin-runtime.md).
 
@@ -48,13 +48,15 @@ Progress and errors identify the source input and selected plugin. Use `--quiet`
 
 ## Publish a plugin
 
-Build a WASI Preview 1 command module, then publish it:
+Build a WASI Preview 1 command module and [package it](reference/plugin-runtime.md#package-for-publication) with its metadata and license files:
 
 ```sh
-bale plugins push -f references.wasm registry.example.com/plugins/references:1
+bale plugins push -f references-1.0.0.tgz registry.example.com/plugins/references:1
 ```
 
-The OCI image has an `application/vnd.wasm.config.v0+json` config with `architecture: wasm`, `os: wasip1` and its ordered layer digests, plus one `application/wasm` layer. An index must select exactly one `wasm/wasip1` manifest. Bundles retain the selected root graph, including an index when present. Registry credentials and HTTP policy follow [registry access](registry.md).
+The archive follows Helm's package layout: one directory containing `plugin.yaml`, `plugin.wasm` and supporting files. Bale metadata selects `type: dependency/v1` and `runtime: wasi/preview1`. Helm's installer does not support this execution contract.
+
+The OCI artifact uses `application/vnd.bale.plugin.v1+json`, an empty config and one gzip archive layer. Publication preserves the package bytes; bundles retain the selected OCI graph, including an index when present. Registry credentials and HTTP policy follow [registry access](registry.md).
 
 ## Reuse a delivered plugin
 
@@ -91,6 +93,6 @@ Create, authorized latest pull and manual generation accept these host settings:
 | `--plugin-memory BYTES` | `268435456` (256 MiB) | Guest linear-memory limit; multiple of 65,536 bytes, at most 4 GiB. |
 | `--plugin-timeout DURATION` | `30s` | Guest execution timeout, excluding compilation. |
 
-Input is limited to 8 MiB, stdout to 4 MiB, stderr to 64 KiB and the module to 128 MiB. The guest limit does not cap compiler or total process memory. Cold compilation can delay cancellation. Runs serialize within a process.
+Input is limited to 8 MiB, stdout to 4 MiB, stderr to 64 KiB and the module to 128 MiB. Plugin archives are limited to 256 MiB in both compressed and expanded form. The guest limit does not cap compiler or total process memory. Cold compilation can delay cancellation. Runs serialize within a process.
 
-Cached code is executable and must stay local and trusted; transfer the original Wasm instead. The [runtime reference](reference/plugin-runtime.md#runtime-and-cache-boundaries) covers cache permissions, portability, cancellation and the SDK's opt-in cache policy.
+Cached code is executable and must stay local and trusted; transfer the portable plugin package instead. The [runtime reference](reference/plugin-runtime.md#runtime-and-cache-boundaries) covers cache permissions, portability, cancellation and the SDK's opt-in cache policy.

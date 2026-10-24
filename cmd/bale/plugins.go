@@ -20,28 +20,29 @@ Usage:
   bale plugins [command]
 
 Available Commands:
-  push       Package a WASIp1 module and publish it to a registry
+  push       Publish a packaged discovery plugin to a registry
 
 Options:
   -h, --help  Help for plugins
 
 Use "bale plugins push --help" for more information.`
 
-const pluginPushHelp = `Package a portable WASIp1 module as a standard Wasm OCI image and publish its tag.
-The module is transferred unchanged; compiled native caches are never published.
+const pluginPushHelp = `Publish a packaged discovery plugin as an OCI artifact.
+The archive includes plugin metadata, its WASIp1 module and license notices.
+Package bytes are transferred unchanged; compiled native caches are never published.
 
 Usage:
   bale plugins push [options] PLUGINREF
 
 Options:
-  -f, --file FILE         Portable WASIp1 module (required)
+  -f, --file FILE         Discovery plugin .tgz archive (required)
       --format FORMAT     Output JSON or a Go template (default: plugin digest)
   -q, --quiet             Suppress progress output
       --plain-http HOST   Permit HTTP for this exact registry host (repeatable)
   -h, --help              Help for plugins push
 
 Examples:
-  bale plugins push -f helm.wasm registry.example.com/plugins/helm:0.1`
+  bale plugins push -f helm-discovery-0.1.0.tgz registry.example.com/plugins/helm-discovery:0.1.0`
 
 type pluginPushResult struct {
 	Reference  string        `json:"reference"`
@@ -82,8 +83,8 @@ func runPlugins(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if err != nil {
 		return fail(errOut, err)
 	}
-	// Use disk-backed OCI storage so large portable modules are never retained
-	// in a second in-memory buffer while packing and uploading.
+	// Use disk-backed OCI storage so plugin archives are not retained in a
+	// second in-memory buffer while packing and uploading.
 	dir, err := os.MkdirTemp("", "bale-plugin-publish-*")
 	if err != nil {
 		return fail(errOut, err)

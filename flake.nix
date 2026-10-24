@@ -45,6 +45,7 @@
             inherit version;
             go_1_27 = go;
           };
+          helm-plugin-archive = pkgs.callPackage ./nix/helm-plugin-archive.nix { inherit helm-plugin; };
           helm-consumer = pkgs.callPackage ./nix/helm-consumer.nix {
             inherit version;
             go_1_27 = go;
@@ -52,7 +53,7 @@
           helm-consumer-archive = pkgs.callPackage ./nix/helm-consumer-archive.nix {
             inherit helm-consumer;
           };
-          helm-plugin-image = pkgs.callPackage ./nix/helm-plugin-image.nix { inherit helm-plugin; };
+          helm-plugin-image = pkgs.callPackage ./nix/helm-plugin-image.nix { inherit helm-plugin-archive; };
           helm-consumer-image = pkgs.callPackage ./nix/helm-consumer-image.nix {
             inherit helm-consumer-archive;
           };
@@ -70,7 +71,7 @@
             inherit
               bale
               zot
-              helm-plugin
+              helm-plugin-archive
               helm-consumer-archive
               flux-service-image
               flux-service-chart
@@ -79,7 +80,7 @@
           kubernetes-acceptance = pkgs.callPackage ./nix/kubernetes-acceptance.nix {
             inherit
               bale
-              helm-plugin
+              helm-plugin-archive
               helm-consumer-archive
               flux-service-image
               flux-service-chart
@@ -98,6 +99,7 @@
               release-binary
               container
               helm-plugin
+              helm-plugin-archive
               helm-plugin-image
               helm-consumer-archive
               helm-consumer-image
@@ -125,6 +127,7 @@
               docs
               release-binary
               helm-plugin
+              helm-plugin-archive
               helm-consumer
               helm-consumer-archive
               helm-plugin-image
@@ -199,6 +202,8 @@
               pkgs.skopeo
               pkgs.regctl
               pkgs.kubernetes-helm
+              pkgs.gnutar
+              pkgs.gzip
             ];
           };
           checks = import ./nix/checks.nix {
@@ -211,6 +216,7 @@
               wasm-contract-fixture
               docs
               helm-plugin
+              helm-plugin-archive
               helm-consumer
               helm-consumer-archive
               helm-plugin-image

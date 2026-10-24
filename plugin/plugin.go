@@ -56,10 +56,11 @@ func Runner(options Options) bale.PluginRunner {
 	}
 }
 
-// Pack writes a portable Wasm OCI image to caller-owned storage and returns its
-// deterministic manifest descriptor. Publication and tagging remain caller owned.
-func Pack(ctx context.Context, store content.Storage, modulePath string) (v1.Descriptor, error) {
-	return pluginoci.Pack(ctx, store, modulePath)
+// Pack writes a discovery plugin archive to caller-owned OCI storage and returns its
+// deterministic manifest descriptor. The package bytes, including its notices,
+// remain unchanged. Publication and tagging remain caller owned.
+func Pack(ctx context.Context, store content.Storage, packagePath string) (v1.Descriptor, error) {
+	return pluginoci.Pack(ctx, store, packagePath)
 }
 
 // RunOCI resolves a plugin through the caller's client and executes its verified

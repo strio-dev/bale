@@ -147,11 +147,11 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	}
 	pluginSubject := seed(t, ctx, client, sourceHost, "offline-plugin-subject", "plugin-subject-v1", false)
 	dir := t.TempDir()
-	modulePath := filepath.Join(dir, "discovery.wasm")
+	packagePath := filepath.Join(dir, "discovery-0.0.0.tgz")
 	output := fmt.Sprintf(`{"schemaVersion":1,"dependencies":[{"ref":%q}]}`, runtime.Repository+":stable")
-	writeFile(t, modulePath, wasmtest.Command(output, 0))
+	writeFile(t, packagePath, wasmtest.Package(wasmtest.Command(output, 0)))
 	pluginStore := memory.New()
-	pluginDescriptor, err := plugin.Pack(ctx, pluginStore, modulePath)
+	pluginDescriptor, err := plugin.Pack(ctx, pluginStore, packagePath)
 	if err != nil {
 		t.Fatal(err)
 	}

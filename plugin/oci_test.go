@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,7 +35,11 @@ func registryPlugin(t *testing.T, output string, exit uint32) (*bale.Client, str
 	t.Helper()
 	ctx := context.Background()
 	store := memory.New()
-	root, err := plugin.Pack(ctx, store, moduleFile(t, wasmtest.Command(output, exit)))
+	packagePath := filepath.Join(t.TempDir(), "discovery-0.0.0.tgz")
+	if err := os.WriteFile(packagePath, wasmtest.Package(wasmtest.Command(output, exit)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := plugin.Pack(ctx, store, packagePath)
 	if err != nil {
 		t.Fatal(err)
 	}

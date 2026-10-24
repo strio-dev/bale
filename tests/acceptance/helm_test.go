@@ -36,10 +36,10 @@ func TestHelmPluginRegistryAcceptance(t *testing.T) {
 		}
 	}
 	if present == 0 {
-		t.Skip("run the registry acceptance app to supply Bale, registries and the production Helm guest")
+		t.Skip("run the registry acceptance app to supply Bale, registries and the production Helm discovery package")
 	}
 	if present != len(names) {
-		t.Fatal("all acceptance executable paths, Helm guest and native Helm consumer archive must be supplied")
+		t.Fatal("all acceptance executable paths, Helm discovery package and native Helm consumer archive must be supplied")
 	}
 	for i, path := range paths {
 		info, err := os.Stat(path)
@@ -56,7 +56,7 @@ func TestHelmPluginRegistryAcceptance(t *testing.T) {
 	}
 }
 
-func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, module, helm, consumer, kind, backend string) {
+func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPackage, helm, consumer, kind, backend string) {
 	source := startRegistry(t, ctx, kind, backend, "Helm source")
 	destination := startRegistry(t, ctx, kind, backend, "Helm destination")
 	dir := t.TempDir()
@@ -79,7 +79,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, module, hel
 	pluginRef := source.host + "/plugins/helm:v1"
 	published := decode[struct {
 		Descriptor v1.Descriptor `json:"descriptor"`
-	}](t, command.run("publish production Helm guest", "plugins", "push", "-f", module, pluginRef, "--format", "json"))
+	}](t, command.run("publish production Helm discovery package", "plugins", "push", "-f", discoveryPackage, pluginRef, "--format", "json"))
 	producer, err := client.Resolve(ctx, pluginRef)
 	if err != nil || producer.Descriptor.Digest != published.Descriptor.Digest {
 		t.Fatalf("published plugin identity: %v", err)

@@ -60,8 +60,9 @@ func main() {
 From a Bale checkout, compile it with the pinned Go toolchain's standard WASI target:
 
 ```sh
+mkdir -p references
 nix develop --no-update-lock-file path:.#runtime --command \
-  env GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o references.wasm references.go
+  env GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -o references/plugin.wasm references.go
 ```
 
 Save this as `request.json`:
@@ -70,11 +71,10 @@ Save this as `request.json`:
 {"refs":["registry.example.com/images/web:stable"]}
 ```
 
-Run it locally, or publish the module for recipe selection:
+Run the module locally:
 
 ```sh
-bale dependencies generate --plugin-file references.wasm --input request.json
-bale plugins push -f references.wasm registry.example.com/plugins/references:1
+bale dependencies generate --plugin-file references/plugin.wasm --input request.json
 ```
 
 The generated authoring YAML is:
@@ -86,13 +86,39 @@ dependencies:
 
 Other languages can produce compatible WASI Preview 1 command modules using the same streams and JSON contract.
 
+## Package for publication
+
+Save this as `references/plugin.yaml`:
+
+```yaml
+apiVersion: v1
+name: references
+version: 1.0.0
+type: dependency/v1
+runtime: wasi/preview1
+```
+
+The package contains one directory named after the plugin, with `plugin.yaml` and the fixed module path `plugin.wasm`. Add your `LICENSE` and applicable third-party license and notice files to that directory before packaging.
+
+From a Bale checkout, use the pinned archive tools and publish the result:
+
+```sh
+nix develop --no-update-lock-file path:.#release --command \
+  tar -czf references-1.0.0.tgz references
+bale plugins push -f references-1.0.0.tgz registry.example.com/plugins/references:1
+```
+
+This follows Helm's archive-inside-OCI distribution pattern. The metadata identifies Bale's dependency protocol and WASI runtime; it is not a Helm-installable plugin. Bale validates the package and runs its module directly, without executing host commands from metadata. License files stay inside the same archive layer.
+
+The archive is limited to 256 MiB in compressed and expanded form; the module remains limited to 128 MiB. Metadata, file counts and archive paths are also bounded and validated. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
+
 ## Runtime and cache boundaries
 
 Bale uses Wago behind an internal adapter; the [Go API](../sdk.md#run-a-dependency-plugin) and portable contract expose no engine-specific types. Wago is a prerelease dependency. Native caches are engine-private and rebuildable from Wasm.
 
 Helm's [`extism/v1` runtime](https://github.com/helm/helm/blob/v4.3.0/internal/plugin/runtime_extismv1.go) uses a different entry point and host APIs. Bale's discovery modules are not interchangeable with Helm Extism plugins. The native Bale Helm consumer uses Helm's `postrenderer/v1` subprocess contract instead.
 
-Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Share the original `.wasm` module instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Insecure or corrupt cache entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
+Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Distribute the portable plugin package instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Insecure or corrupt cache entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
 
 Disk caching requires supported Unix ownership and no-follow file operations. On other platforms, leave `CacheDirectory` empty or pass `--plugin-cache ''`.
 

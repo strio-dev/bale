@@ -6,6 +6,7 @@
   release-binary,
   container,
   helm-plugin,
+  helm-plugin-archive,
   helm-plugin-image,
   helm-consumer-archive,
   helm-consumer-image,
@@ -28,6 +29,7 @@ runCommand "bale-distribution-${version}-${platform}"
     cp ${release-binary}/*.tar.gz "$out/archives/"
     cp ${helm-consumer-archive}/${helm-consumer-archive.archiveName} "$out/archives/helm-consumer-${platform}/"
     cp ${flux-service-chart}/*.tgz "$out/archives/"
+    cp ${helm-plugin-archive}/${helm-plugin-archive.archiveName} "$out/archives/"
     cp ${helm-plugin}/lib/bale/plugins/helm.wasm "$out/helm-discovery/"
     cp -R ${helm-plugin}/share/licenses/bale-helm-plugin "$out/helm-discovery/licenses"
     cp -R ${container} "$out/oci/bale"

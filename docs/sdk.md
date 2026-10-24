@@ -126,13 +126,13 @@ if err != nil {
 }
 ```
 
-Creation resolves OCI plugins, verifies modules, binds inputs and retains provenance plus generated declarations. Without a runner, a recipe requiring execution fails. Locked pull and push never run plugins. Latest refresh additionally requires `PullWithOptions(ctx, ref, path, bale.PullLatest, bale.PullOptions{AllowPlugins: true})`.
+Creation resolves OCI plugin packages, verifies and extracts their modules, binds inputs and retains provenance plus generated declarations. Without a runner, a recipe requiring execution fails. Locked pull and push never run plugins. Latest refresh additionally requires `PullWithOptions(ctx, ref, path, bale.PullLatest, bale.PullOptions{AllowPlugins: true})`.
 
 | Plugin API | Use |
 | --- | --- |
 | `plugin.RunOCI(ctx, client, request, options)` | Run an OCI plugin using the client's credentials and transport. |
 | `plugin.Run(ctx, request, options)` | Run an explicit local module. |
-| `plugin.Pack(ctx, store, modulePath)` | Write a portable Wasm OCI graph into caller-owned storage for transfer. |
+| `plugin.Pack(ctx, store, packagePath)` | Validate a plugin `.tgz` and write its unchanged archive into a transferable OCI graph. |
 
 Manual requests supply plugin-defined JSON, including any required archive bytes. Recipe blob bindings apply during capture. Defaults are 30 seconds and 256 MiB of linear memory; an empty `CacheDirectory` disables persistent caching. Keep cached native code local and trusted. Runs serialize within the process and waits are cancellable; synchronous compilation can delay cancellation. These settings do not cap compilation time or total process memory. See [dependency plugins](plugins.md) for the portable contract and limits.
 

@@ -24,7 +24,11 @@ import (
 // This exercises the production guest through configured OCI discovery, rather
 // than generating and publishing an attachment as a separate authoring step.
 func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
-	path, options := helmPlugin(t)
+	_, options := helmPlugin(t)
+	packagePath := os.Getenv("BALE_HELM_PLUGIN_ARCHIVE")
+	if info, err := os.Stat(packagePath); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("BALE_HELM_PLUGIN_ARCHIVE must identify a built production discovery package: %v", err)
+	}
 	sourceRegistry, holdingRegistry := &deliveryRegistry{}, &deliveryRegistry{}
 	source, holding := httptest.NewServer(sourceRegistry), httptest.NewServer(holdingRegistry)
 	defer source.Close()
@@ -55,7 +59,7 @@ func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor, err := plugin.Pack(t.Context(), store, path)
+	descriptor, err := plugin.Pack(t.Context(), store, packagePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +162,7 @@ func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
 	}
 	var manifest v1.Manifest
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil || len(manifest.Layers) != 1 {
-		t.Fatalf("plugin manifest missing Wasm layer: %v", err)
+		t.Fatalf("plugin manifest missing archive layer: %v", err)
 	}
 	declarations, err := target.InspectDependencies(t.Context(), destinationHost+"/release/charts/app@"+subject.Descriptor.Digest.String())
 	if err != nil || len(declarations) != 1 || declarations[0].Descriptor.Digest != lockedPlugin.Declaration.Digest {
@@ -184,8 +188,8 @@ func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
 		freshOptions := options
 		freshOptions.CacheDirectory = cache
 		run := plugin.Runner(freshOptions)
-		var runs, moduleDownloads atomic.Int64
-		modulePath := "/v2/release/plugins/helm/blobs/" + manifest.Layers[0].Digest.String()
+		var runs, packageDownloads atomic.Int64
+		packageBlobPath := "/v2/release/plugins/helm/blobs/" + manifest.Layers[0].Digest.String()
 		reuser, err := bale.NewClient(bale.ClientOptions{
 			PlainHTTPRegistries: []string{destinationHost},
 			HTTPClient: &http.Client{Transport: inspectRoundTripper(func(r *http.Request) (*http.Response, error) {
@@ -197,8 +201,8 @@ func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
 					t.Errorf("reuse wrote to delivered source: %s %s", r.Method, r.URL)
 					return nil, errors.New("unexpected delivered source write")
 				}
-				if r.Method == http.MethodGet && r.URL.Path == modulePath {
-					moduleDownloads.Add(1)
+				if r.Method == http.MethodGet && r.URL.Path == packageBlobPath {
+					packageDownloads.Add(1)
 				}
 				return http.DefaultTransport.RoundTrip(r)
 			})},
@@ -228,8 +232,8 @@ func TestHelmPluginOCIConfiguredCapture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !recaptured.Published || runs.Load() != 1 || moduleDownloads.Load() == 0 {
-			t.Fatalf("delivered plugin was not executed: published=%t runs=%d Wasm downloads=%d", recaptured.Published, runs.Load(), moduleDownloads.Load())
+		if !recaptured.Published || runs.Load() != 1 || packageDownloads.Load() == 0 {
+			t.Fatalf("delivered plugin was not executed: published=%t runs=%d package downloads=%d", recaptured.Published, runs.Load(), packageDownloads.Load())
 		}
 		if len(recaptured.Metadata.Plugins) != 1 {
 			t.Fatalf("missing reused plugin pin: %+v", recaptured.Metadata.Plugins)

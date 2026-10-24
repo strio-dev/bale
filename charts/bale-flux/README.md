@@ -4,15 +4,34 @@ Deploys `bale-flux`, which supplies destination attachment mappings to Flux
 Operator's ExternalService input provider. It does not install Flux Operator,
 input providers, or ResourceSets.
 
-Configure an allowlist in values:
+For a complete registry transfer and Flux setup, follow the [Flux guide](../../docs/flux.md).
+For a local chart install, build the adapter image using the
+[integration release workflow](../../docs/development/releases.md#build-integrations)
+and publish it to a registry your cluster can pull from. You need Helm 4, kubectl,
+Flux and Flux Operator installed in the destination cluster.
+
+Save an allowlist and the published image location in `values.yaml`:
 
 ```yaml
+image:
+  repository: registry.example.com/images/bale-flux
+  tag: dev
 releases:
   - name: web
     chart: mirror.example.com/charts/web:1.0.0
     selection:
       context: production
 ```
+
+Replace the example references and configure the Secrets below before installing
+from the Bale repository root:
+
+```sh
+helm upgrade resolver ./charts/bale-flux --install \
+  --namespace flux-system --create-namespace --values values.yaml --wait
+```
+
+Connect the service to Flux with the [provider and ResourceSet example](../../plugins/helm-relocate/examples/flux/README.md).
 
 Use `existingConfigMap` instead of `releases` to load a ConfigMap containing
 `releases.yaml`. The configuration is read at startup: restart the Deployment

@@ -1,10 +1,12 @@
-# Helm discovery reference
+# Helm integration
 
-The [Helm guide](../helm.md) covers capture and deployment. This reference describes the discovery request and the images it can find.
+Reference for chart discovery and the native Helm consumer. Follow the [Helm guide](../helm.md) for capture, transfer and deployment.
 
-## Generate a declaration manually
+## Discovery
 
-Place your packaged chart at `chart.tgz`. All declared chart dependencies must already be bundled recursively under `charts/`, including dependencies disabled by this profile. Bale does not fetch them. Build a request from the local files with Python's standard library:
+### Generate a declaration manually
+
+Place the chart at `chart.tgz`, with every declared subchart packaged recursively under `charts/`, including disabled dependencies. Build a request with Python's standard library:
 
 ```sh
 python3 - <<'PY'
@@ -26,7 +28,7 @@ PY
 bale dependencies generate --plugin registry.example.com/plugins/helm:1 --input request.json > dependencies.yaml
 ```
 
-To supply render values, add YAML texts to `valuesFiles` in precedence order. Add inline overrides to the `values` object; they take precedence over the files.
+Supply YAML text in `valuesFiles`, in precedence order. Inline `values` override those files.
 
 Review `dependencies.yaml`, then attach it to the matching OCI chart:
 
@@ -34,15 +36,15 @@ Review `dependencies.yaml`, then attach it to the matching OCI chart:
 bale dependencies attach registry.example.com/charts/web:1.4 -f dependencies.yaml
 ```
 
-The archive in the request must match the chart you attach to. Bale does not compare those bytes automatically. To generate and attach directly, replace `-f dependencies.yaml` with `--plugin registry.example.com/plugins/helm:1 --input request.json`.
+The request archive must match the chart you attach to; Bale does not compare them automatically. To generate and attach together, replace `-f dependencies.yaml` with `--plugin registry.example.com/plugins/helm:1 --input request.json`.
 
 Use `--plugin-file result-helm-plugin/lib/bale/plugins/helm.wasm` to run a local module during development.
 
-Without a configured plugin, bundle creation follows a single matching source declaration automatically. If the chart has several profiles attached, select the intended declaration context in the [bundle recipe](../recipes.md#control-dependency-following). The chart archive remains unchanged; its [destination records](../destinations.md) report the captured image placements.
+Without a configured plugin, capture follows one matching source declaration automatically. Select among several profiles in the [recipe](../recipes.md#control-dependency-following). [Destination records](../destinations.md) report the captured image placements; chart bytes stay unchanged.
 
-## Request fields
+### Request fields
 
-Input is strict UTF-8 JSON. Unknown and duplicate fields are rejected. Required fields must be present, and top-level fields must not be `null`.
+Requests are strict UTF-8 JSON. Unknown, duplicate and null top-level fields are rejected.
 
 | Field | Meaning |
 | --- | --- |
@@ -58,13 +60,13 @@ Input is strict UTF-8 JSON. Unknown and duplicate fields are rejected. Required 
 | `capabilities.apiVersions` | Optional array added to Helm's default API versions. |
 | `additionalImages` | Optional image reference strings to include alongside discovered images. |
 
-Helm chart defaults apply first, followed by ordered values files and inline values. The stock SDK processes dependency aliases, tags, conditions, and imported values, validates values schemas, and checks the chart's `kubeVersion` constraint against the requested capabilities.
+Helm applies chart defaults, ordered values files, then inline values. Its SDK processes dependency aliases, tags, conditions and imported values, validates schemas, and checks the chart's `kubeVersion` constraint.
 
-Rendering is offline. `lookup` has no cluster client and returns empty results; DNS lookups are disabled. Values schemas must be self-contained: external references that require fetching cannot be resolved in the sandbox. A chart that depends on live cluster state may therefore need explicit values or a different preparation step.
+Rendering is offline: `lookup` returns empty results and DNS is disabled. Values schemas must be self-contained. Charts needing live cluster state may require explicit values or another preparation step.
 
-## Image inventory
+### Image inventory
 
-The plugin renders parent and subchart templates, including lifecycle and test hooks. It inspects their pod specifications without executing hooks or installing any resources.
+The plugin renders parent charts, subcharts and lifecycle/test hooks. It inspects pod specifications without executing hooks or installing resources.
 
 | API version | Supported kinds |
 | --- | --- |
@@ -72,24 +74,86 @@ The plugin renders parent and subchart templates, including lifecycle and test h
 | `apps/v1` | `Deployment`, `StatefulSet`, `DaemonSet`, `ReplicaSet` |
 | `batch/v1` | `Job`, `CronJob` |
 
-For those pod specifications it reads `containers`, `initContainers`, and `ephemeralContainers`. `List` items are inspected recursively using the same supported kinds and versions.
+It reads `containers`, `initContainers` and `ephemeralContainers`, recursively inspecting `List` items with the same supported kinds and versions.
 
 Malformed supported workloads and invalid image references fail generation without a partial declaration.
 
-Custom resources, CRDs, ConfigMaps, annotations, and arbitrary fields named `image` are not scanned heuristically. Include their image dependencies through `additionalImages` or another explicit declaration. Manifests generated only during hook execution or by an operator are outside this render's inventory.
+Custom resources, CRDs, ConfigMaps, annotations and arbitrary `image` fields are not scanned. Use `additionalImages` or an explicit declaration for them. Resources created by executing hooks or operators are outside the rendered inventory.
 
-Discovered and additional image references are normalized, sorted, and deduplicated. For example, `busybox` becomes `docker.io/library/busybox:latest`. Explicit tags are preserved unless a digest is present; a tag-plus-digest reference becomes a digest-only reference. The output is the existing Bale declaration JSON with the chosen context, without a Helm-specific envelope. The CLI converts it into authoring YAML.
+References are normalized, sorted and deduplicated: `busybox` becomes `docker.io/library/busybox:latest`. Tags are preserved unless a digest is present; tag-plus-digest becomes digest-only. Output is Bale declaration JSON with the selected context; the CLI converts it to authoring YAML.
 
-## Limits and Go API
+### Limits and Go API
 
-The complete request, including the base64 chart and values, must fit within 8 MiB. Base64 encoding increases the archive's size, so an 8 MiB archive will not fit. Declaration output is limited to 4 MiB, and Helm's loader retains its stock 100 MiB expanded-chart limit. Guest memory, execution timeout, compiler memory, and local caching follow the [plugin runtime limits](plugin-runtime.md).
+The request, including base64 chart bytes and values, must fit within 8 MiB; an 8 MiB archive will not fit after encoding. Declaration output is limited to 4 MiB and the expanded chart to Helm's stock 100 MiB. See [plugin runtime limits](plugin-runtime.md) for memory, timeout and caching.
 
-Recipe blob bindings read and verify the selected chart layer. Manual request preparation reads local files and passes their contents to the sandbox as JSON.
+Recipe bindings verify the selected chart layer. Manual requests supply local file contents as JSON.
 
-The independent Go module `github.com/strio-dev/bale/plugins/helm` exposes `helmplugin.Discover(ctx, inputBytes)`, returning declaration JSON or an error. Native calls have host access, including external schema references; use Bale's plugin runner for sandboxing. This plugin-specific request schema is separate from the generic WASI protocol.
+The Go module `github.com/strio-dev/bale/plugins/helm` exposes `helmplugin.Discover(ctx, inputBytes)`. Native calls have host access, including external schema references; use Bale's runner for sandboxing. This request schema is specific to Helm discovery.
 
-## Offline build
+### Offline build
 
-The Nix build applies [`helm-offline.patch`](https://github.com/strio-dev/bale/blob/main/nix/patches/helm-offline.patch) to vendored Helm dependencies and selects `helm_offline`. It separates cluster-client imports from rendering and retains Helm's chart loader, templates, Sprig functions, dependency processing and schema validation. Direct Go builds use unmodified Helm and produce a larger module.
+Nix applies [`helm-offline.patch`](https://github.com/strio-dev/bale/blob/main/nix/patches/helm-offline.patch) and selects `helm_offline`. This separates cluster-client imports from the renderer while retaining Helm's loader, templates, Sprig, dependency processing and schema validation. Direct Go builds use unmodified Helm and produce a larger module.
 
-The fixed vendor hash verifies the patched tree. Helm or Kubernetes upgrades require reviewing the patch and its default API-version snapshot; see the [patch maintenance notes](https://github.com/strio-dev/bale/blob/main/nix/patches/README.md). Runtime and memory limits are documented in the [plugin runtime reference](plugin-runtime.md).
+The vendor hash verifies the patched tree. Review the patch and default API-version snapshot when upgrading Helm or Kubernetes; see [patch maintenance](https://github.com/strio-dev/bale/blob/main/nix/patches/README.md).
+
+## Deployment
+
+### Command syntax
+
+```text
+helm bale [Bale selectors] install|upgrade|template RELEASE OCI_CHART [Helm flags]
+```
+
+The chart needs an explicit tag, digest or exact `--version`. Version ranges and implicit highest-version selection are unsupported. Helm receives the pinned chart and retains its environment, streams and exit status. Bale occupies the post-renderer slot.
+
+### Select a capture
+
+The consumer requires one matching local destination attachment and one selected dependency resolution:
+
+| Selector | Value |
+| --- | --- |
+| `--bundle` | Delivered bundle repository and digest. |
+| `--source` | Original chart repository and digest. |
+| `--capture` | Owning capture digest. |
+| `--declaration` | Selected declaration digest. |
+| `--context` | Declaration context string. |
+
+Place selectors before the action. Selection never chooses the newest attachment or combines captures. An explicitly selected empty declaration is valid. Missing, disabled or unselected dependency observations fail before Helm starts.
+
+### Supported images and limits
+
+The renderer handles the [workloads supported by discovery](helm-discovery.md#image-inventory), including hooks, init containers, ephemeral containers and nested Lists. It replaces mapped source selectors with pinned destination references and leaves valid unmapped references unchanged. Custom resource fields need a consumer that understands their schema.
+
+Malformed workloads, invalid images and invalid metadata fail without partial YAML. Anchors, aliases and merge keys on supported workload paths are rejected, even when an image has no mapping.
+
+| Input or output | Limit |
+| --- | --- |
+| Rendered YAML input | 8 MiB |
+| Relocated YAML output | 16 MiB |
+| Advertised referrers | 256 |
+| Inventory and attachment reads | 4 MiB |
+| Serialized destination records | 4 MiB |
+
+The adapter passes records through a temporary `0600` file and removes it when Helm exits.
+
+### Registry credentials
+
+Chart retrieval and attachment lookup share `--plain-http`, `--ca-file`, `--cert-file`, `--key-file`, `--username`, `--password` and `--insecure-skip-tls-verify`. Prefer credential stores to passwords in arguments.
+
+Helm 4.3.0's OCI plugin installer reads the default Helm credential location or Docker credentials. A custom `--registry-config` alone does not reach it; keep `HELM_CONFIG_HOME` and `HELM_REGISTRY_CONFIG` aligned as in the [login example](../helm.md#private-registry-access). This follows the [pinned client implementation](https://github.com/helm/helm/blob/bec5b06ed841fe5269972d864d5177944fd5970f/pkg/registry/client.go#L87-L119).
+
+### Filter an existing stream
+
+Inspect the exact delivered chart digest, then pass the records and rendered YAML to the installed filter:
+
+```sh
+chart_ref='mirror.example.com/release/charts/web@sha256:<full-chart-digest>'
+bale destinations inspect "$chart_ref" > destinations.json
+"$(helm env HELM_PLUGINS)/bale/bale-relocate" \
+  --chart="$chart_ref" --records-file=destinations.json \
+  < rendered.yaml > relocated.yaml
+```
+
+Substitute the full digest and supply `rendered.yaml`. The filter makes no registry requests. It cannot authenticate which chart produced an arbitrary stream: `--chart` is the caller's assertion.
+
+`--records-file` accepts 4 MiB; `--records-json` accepts 64 KiB. The same capture selectors apply. This path also exposes renderer diagnostics that Helm may hide.

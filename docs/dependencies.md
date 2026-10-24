@@ -25,7 +25,7 @@ dependencies:
 | `follow` | `auto` by default; `none` includes this dependency without expanding its declarations. |
 | `select` | Choose the dependency's own declaration by exactly one `context` or complete manifest `digest`. Incompatible with `follow: none`. |
 
-YAML authoring omits `schemaVersion`. Unknown or duplicate fields are rejected. Equivalent entries are deduplicated; shared content is stored by digest.
+YAML authoring omits `schemaVersion` and contains exactly one document. Unknown or duplicate fields, aliases, anchors, merge keys and nonstring scalars are rejected. String fields must be nonempty without surrounding whitespace. Equivalent entries are deduplicated; shared content is stored by digest.
 
 ```sh
 bale dependencies attach registry.example.com/charts/web:1.4 -f dependencies.yaml
@@ -45,15 +45,7 @@ List and inspect default to JSON arrays (`[]` when empty). For authentication, H
 
 ## Generate with a plugin
 
-A [recipe plugin](recipes.md#discover-dependencies-with-a-plugin) generates a declaration during creation without writing a source attachment. To review the declaration separately:
-
-```sh
-bale dependencies generate --plugin registry.example.com/plugins/references:1 --input request.json > dependencies.yaml
-```
-
-Supply a published plugin reference and its application-specific JSON request. The command validates its output and writes authoring YAML. `dependencies attach` also accepts `--plugin REF --input request.json` instead of `-f`; use `--plugin-file references.wasm` for local development. Manual generation and attachment leave dependency references unresolved.
-
-See [dependency plugins](plugins.md) for packaging and the module contract, or [Helm discovery](helm.md) for packaged charts.
+A [recipe plugin](recipes.md#discover-dependencies-with-a-plugin) generates a declaration during creation without writing a source attachment. For standalone generation or attachment with `--plugin` or `--plugin-file`, follow [manual plugin authoring](plugins.md#generate-or-attach-a-declaration-manually). These commands validate the output and leave dependency references unresolved until capture.
 
 ## Payload and envelope
 

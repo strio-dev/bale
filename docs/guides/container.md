@@ -1,6 +1,6 @@
 # Run Bale in a container
 
-Use the Bale image to capture and deliver bundles with Podman or Docker. It includes the CLI, CA roots and license notices for Linux AMD64 and ARM64.
+Use the Bale image with Podman or Docker to capture and deliver bundles. The image includes the CLI and CA certificates for Linux AMD64 and ARM64.
 
 ## Check the CLI
 
@@ -8,11 +8,11 @@ Use the Bale image to capture and deliver bundles with Podman or Docker. It incl
 podman run --rm ghcr.io/strio-dev/bale:latest --help
 ```
 
-Replace `latest` with a published release tag to pin a version. Prereleases have versioned tags; stable releases update `latest`. In image tags, replace a release version's `+` with `_`.
+Replace `latest` with a published release tag to pin a version. Stable releases update `latest`; prereleases keep versioned tags. Replace `+` with `_` in image tags containing build metadata.
 
 ## Capture a bundle
 
-Save the [first-bundle recipe](../tutorials/first-bundle.md#write-a-recipe) as `bale.yaml` in a working directory. Mount that directory and an optional cache volume:
+Save the [first-bundle recipe](../tutorials/first-bundle.md#write-a-recipe) as `bale.yaml`, then mount its working directory:
 
 ```sh
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
@@ -21,13 +21,16 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
   create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
 ```
 
-`/work` is the working directory; outputs appear in your host directory. The user and namespace options give them your host ownership. `:Z` labels the bind mount for SELinux. The optional `/cache` volume retains compiled discovery plugins between runs; keep each cache volume private to one effective user.
+The mounts have two purposes:
 
-No privileged mode, container socket or nested runtime is needed. Plugins run inside Bale. Without a cache volume, their compiled cache lasts only for that container.
+- `$PWD:/work:Z` makes the project writable inside the container. Outputs have your host ownership; `:Z` supplies an SELinux label.
+- `bale-cache:/cache` retains compiled discovery plugins between runs. This mount is optional; keep the cache private to one effective user.
+
+Bale needs no privileged mode, container socket or nested runtime. Plugins run inside Bale.
 
 ## Save, restore and deliver
 
-Use the same workspace mount for subsequent commands:
+Use the same workspace mount:
 
 ```sh
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
@@ -40,11 +43,11 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
   --delivery bale.delivery.yaml --dry-run
 ```
 
-Replace the destination with a registry you can write to, configure credentials below, then remove `--dry-run` to publish. Layouts, archives and exported delivery files require new paths. See [offline packaging](../offline.md) for moving the archive between machines.
+Use new output paths. Replace the destination, configure credentials below, then remove `--dry-run` to publish. See [offline packaging](../offline.md) to move the archive between machines.
 
 ## Registry credentials
 
-Mount a Docker-compatible credential directory read-only and set `DOCKER_CONFIG` to its container path. For example, create `$HOME/.config/bale/registry-auth/config.json` with your registry login tool, then mount that directory separately from the workspace:
+Create a Docker-compatible credential directory with your registry login tool, then mount it read-only:
 
 ```sh
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
@@ -54,19 +57,19 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
   push ./restored mirror.example.com/release:bundle --delivery bale.delivery.yaml
 ```
 
-The image has no credential-helper executables; the mounted config must contain usable registry credentials. Keep it out of bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. [Registry configuration](../registry.md#authentication-and-transport) also covers exact-host HTTP access.
+The example expects `$HOME/.config/bale/registry-auth/config.json`. The image has no credential helpers, so the file must contain usable credentials. Keep it outside bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. See [registry access](../registry.md#authentication-and-transport).
 
 ## Docker
 
-On Linux, use the same commands with `docker` and omit `--userns=keep-id`, keeping `--user "$(id -u):$(id -g)"`. The image defaults to UID/GID `65532:65532`; both engines can override it. `/tmp`, `/work` and `/cache` are writable, and `HOME=/tmp` permits arbitrary UIDs.
+On Linux, replace `podman` with `docker` and omit `--userns=keep-id`. Keep `--user "$(id -u):$(id -g)"` for host-owned output. The image defaults to UID/GID `65532:65532` and supports arbitrary UIDs with writable `/tmp`, `/work` and `/cache`.
 
 ## Build locally
 
-From a Bale checkout with [Nix set up](../contributing.md):
+From a checkout with [Nix set up](../contributing.md):
 
 ```sh
 just container-build
 podman run --rm oci:result-container:nix --version
 ```
 
-The build needs no container runtime and produces an OCI layout for the host architecture. Podman is needed only to run it. Local builds use the constant layout tag `nix`; the image version label and CLI report the build's Bale version.
+Nix builds the current platform's OCI layout without a container runtime. Its local tag is `nix`; the version label and CLI report the build version.

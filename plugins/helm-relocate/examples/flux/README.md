@@ -5,10 +5,25 @@ Operator's `ExternalService` provider. It neither renders charts nor changes
 Bale push behavior. This example targets Flux Operator 0.61.0 and Flux
 helm-controller 1.6.5 (Kustomize 0.21.1).
 
-Start the resolver with the example allowlist adapted to your registry:
+For cluster deployment, follow the [Flux guide](../../../../docs/flux.md) to
+build and deliver the adapter image and chart, configure credentials, and install
+the service. Flux, Flux Operator, and the application chart with its destination
+records must already be available. The files here install only the provider and
+ResourceSet.
+
+To run the resolver on a Linux AMD64 or ARM64 host instead, build it with Nix
+from the Bale repository root:
 
 ```sh
-bale-flux --config releases.yaml --listen 127.0.0.1:8080 \
+nix build --no-update-lock-file path:.#flux-service --out-link result-flux-service
+```
+
+Copy [releases.yaml](releases.yaml) to `releases.yaml` in the repository root,
+replace its chart reference with your delivered chart, and provide the registry
+credential file:
+
+```sh
+result-flux-service/bin/bale-flux --config releases.yaml --listen 127.0.0.1:8080 \
   --registry-config /run/secrets/registry/config.json
 ```
 
@@ -29,11 +44,12 @@ bypass. Registry options `--ca-file`, `--cert-file`, `--key-file`, and repeated
 
 Git manages the provider and ResourceSet; Flux Operator owns generated sources
 and HelmReleases. Step one prepares a repository-and-digest-addressed chart
-source scoped to the release and waits for readiness. Step two updates the stable release's chart
-reference and post-renderers together. Previous sources are pruned after the
-final step is applied, before final HelmRelease readiness. Give each release one owning ResourceSet and a distinct name
-in its namespace. Keep values and other normal HelmRelease settings in the
-ResourceSet template. Adapt the example's three separate credentials: resolver
+source scoped to the release and waits for readiness. Step two updates the stable
+release's chart reference and post-renderers together. Previous sources are pruned after the
+final step is applied, before final HelmRelease readiness. Give each release one
+owning ResourceSet and a distinct name in its namespace. Keep values and other
+normal HelmRelease settings in the ResourceSet template. Adapt the example's
+three separate credentials: resolver
 registry access, provider-to-resolver token, and Flux source registry Secret.
 Workload image-pull credentials are also a cluster concern.
 
@@ -44,6 +60,14 @@ For a private CA, create the same-namespace Secrets referenced by
 `bale-resolver-ca` (`ca.crt`) authenticate the separate resolver HTTPS connection.
 The [private registry configuration](../../../../docs/flux.md#private-registry-configuration)
 shows creation commands, resolver mounts, Helm login and node/containerd trust.
+Copy [resources.yaml](resources.yaml), set its provider URL to the reachable
+resolver's `/inputs/web` endpoint, and apply it after creating the `apps`
+namespace and its Secrets:
+
+```sh
+kubectl apply -f resources.yaml
+```
+
 Adapt the example workload `imagePullSecrets` value to the chart, including
 hooks and subcharts; the resolver does not add pull credentials.
 

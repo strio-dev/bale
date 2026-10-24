@@ -1,13 +1,12 @@
 # Bale
 
-Bale bundles OCI images and artifacts for registry and offline transfer, preserving their original digests, multiarchitecture content and declared dependencies.
+Bale bundles OCI images and artifacts for registry and offline transfer.
 
 ## Install
 
-Install a Linux AMD64 or ARM64 release:
-
 ```sh
 curl -fsSL https://bale.strio.dev/install.sh | sh
+bale --version
 ```
 
 See [getting started](https://bale.strio.dev/getting-started/) for requirements, exact versions, the container image and Nix.

@@ -2,38 +2,40 @@
 
 ## Set up
 
-Development requires Linux and Nix. From a checkout, enter the pinned shell:
+Development requires Linux and Nix. Enter the pinned shell from a checkout:
 
 ```sh
 nix develop path:.
 bale --help
 ```
 
-Direnv loads the same shell with `direnv allow`. The shell supplies Go, Just and linters; its `bale` command runs your current source. Read [how bundles work](concepts/bundles.md) before changing capture or delivery behavior.
+Direnv can load it with `direnv allow`. The shell provides Go, Just and linters; `bale` runs the current source.
 
-## Build and check
+## Build from source
 
 ```sh
 just build
 ./result-bale/bin/bale --version
 ```
 
-Use focused checks while editing, then run `just fmt` and `just check` before submitting:
+`path:.` includes untracked files. Git-based flake commands, including `just release-check`, use tracked files with their current working-tree edits.
 
-| Command | Purpose |
+## Check changes
+
+Run focused checks while editing, then format and check the result:
+
+```sh
+just fmt
+just check
+```
+
+| Command | Checks |
 | --- | --- |
-| `just test` | Tests in all three Go modules. |
-| `just vet` / `just lint` | Go static analysis in all modules. |
-| `just fmt` | Format Go, Nix and the Justfile in place. |
-| `just check` | Full flake checks, including docs, plugins and acceptance suites. |
-| `just scan` / `just vuln` | Semgrep and Go vulnerability checks. |
-| `just registry-acceptance` | Packaged CLI and consumers against native registries. |
-| `just container-acceptance` | Packaged CLI container through offline transfer and TLS tests. |
-| `just distribution-build` | Finished archives and OCI layouts for the current Linux platform. |
+| `just test` | Tests in all Go modules. |
+| `just vet` / `just lint` | Go static analysis. |
+| `just scan` / `just vuln` | Security and dependency checks. |
 
-Build and check commands use the pinned Nix tools. Container acceptance requires Linux AMD64 and writable `/dev/kvm`; other focused checks run without a VM. Add regression coverage for behavior changes. See [test suites](development/testing.md) for details and optional live Kubernetes tests.
-
-Nix commands using `path:.` include untracked files. `just release-check` checks the Git source, including working-tree edits to tracked files. Stage new files before that check.
+Add regression coverage for behavior changes. Full checks on AMD64 require writable `/dev/kvm`; see [test suites](development/testing.md) for acceptance tests and prerequisites.
 
 ## Edit documentation
 
@@ -42,14 +44,8 @@ just docs-serve
 just docs-build
 ```
 
-Open the preview at <http://127.0.0.1:8000>. The strict build writes `result-docs/`. Add pages to `zensical.toml`, keep examples runnable, and link detailed contracts from task guides.
+Open <http://127.0.0.1:8000>. The strict build writes `result-docs/`. Add pages to `zensical.toml` and keep examples runnable. The pinned [Strio theme](https://github.com/strio-dev/strio-zensical-theme) supplies the shared styling and templates.
 
-The pinned [Strio theme](https://github.com/strio-dev/strio-zensical-theme) supplies styling, templates and copy controls. Bale owns its content, navigation, accent and logos.
+## Releases
 
-## CI and releases
-
-GitHub Actions invokes the same Nix checks for quality, documentation, registry and container acceptance, and native Linux AMD64/ARM64 builds. Semgrep and CodeQL use Nix commands and publish security findings. Documentation deploys from `main` after its checks pass.
-
-Build local CLI archives with `just release-build`, an OCI image layout with `just container-build`, or all finished artifacts with `just distribution-build`. The [distribution guide](development/testing.md#distribution-output) describes the Helm and Flux packages and the Nix publishing command.
-
-After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1`. CI publishes static Linux AMD64/ARM64 archives, `SHA256SUMS` and a multiarchitecture `ghcr.io/strio-dev/bale` image. Stable releases update the image's `latest` tag; build metadata replaces `+` with `_` in image tags. Assets are assembled in a draft first; reruns preserve published versions. Helm and Flux artifacts are published separately with the Nix publishing command.
+Version tags publish the CLI archives and container image. See [packaging and releases](development/releases.md) to build integration artifacts, publish them to OCI or prepare a release.

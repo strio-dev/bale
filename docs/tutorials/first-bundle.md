@@ -1,14 +1,12 @@
 # Capture your first bundle
 
-Capture BusyBox from Docker Hub, save it as a portable archive, and restore it without contacting the source registry. You can choose a destination registry later.
+Capture BusyBox from Docker Hub, save it as an archive, then restore it offline. Choose a destination registry when you are ready to deliver.
 
 ## Before you start
 
-[Install Bale](../getting-started.md). You need access to Docker Hub for capture, disk space for the image, and an empty working directory. No container runtime or writable registry is needed.
+[Install Bale](../getting-started.md). You need access to Docker Hub and disk space for the image. The next step creates a working directory. Capture needs neither a container runtime nor a writable registry.
 
 ## Write a recipe
-
-Start a new directory:
 
 ```sh
 mkdir bale-first-bundle
@@ -22,7 +20,7 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-The recipe names what to capture, without a destination. Bale resolves the tag to a digest and includes its platform images.
+Bale resolves the tag to a digest and includes its platform images.
 
 ## Capture and inspect
 
@@ -32,15 +30,15 @@ bale create --layout -f bale.yaml ./release \
 bale inspect --layout ./release -f '{{.Descriptor.Digest}}'
 ```
 
-Creation prints a bundle digest. Inspection prints the same digest from the completed layout. `release/` holds the captured OCI content; `bale.delivery.yaml` lists editable publication paths for that snapshot.
+Both commands print the same bundle digest. `release/` contains the captured content; `bale.delivery.yaml` lists its publication paths.
 
-To see the full inventory:
+View the full JSON inventory with:
 
 ```sh
 bale inspect --layout ./release
 ```
 
-The JSON report includes the recipe, captured roots and resolved content. The [inspection guide](../inspection.md) covers comparisons and formatting.
+The [inspection guide](../inspection.md) explains the report and formatting options.
 
 ## Save and restore
 
@@ -51,28 +49,26 @@ bale inspect --layout ./restored -f '{{.Descriptor.Digest}}'
 bale diff --layout ./release ./restored
 ```
 
-The restored digest matches the original. Diff reports `Bundle changed: false`. Save and load need no registry access; shared content is stored once by digest. Carry `release.tar` across an offline boundary and restore it there in the same way.
+The restored digest matches the original, and diff reports `Bundle changed: false`. Save and load work offline and store shared content once by digest. Carry `release.tar` to another machine and restore it there the same way.
 
-Layouts, archives and exported delivery files require new paths. Keep the original layout for comparison, or use different names when repeating this tutorial.
+Output paths must not already exist; an empty directory is rejected too. Use a new working directory when repeating the tutorial.
 
 ## Preview delivery
-
-You can preview publication without contacting a destination:
 
 ```sh
 bale push ./restored mirror.example.com/releases/first:bundle \
   --delivery bale.delivery.yaml --dry-run
 ```
 
-`mirror.example.com` is a placeholder. The preview shows where the captured artifacts would go; it needs no registry credentials. Edit `path` values in the delivery file if you want different member repositories, then preview again.
+The placeholder destination needs no credentials for this preview. Edit `path` values in the delivery file to choose different member repositories, then preview again.
 
 ## Publish when ready
 
-Actual delivery requires a writable registry. Replace the example reference below with your own registry and repository, and configure [registry credentials](../registry.md#authentication-and-transport):
+Replace the destination with a writable registry and configure [credentials](../registry.md#authentication-and-transport):
 
 ```sh
 bale push ./restored mirror.example.com/releases/first:bundle \
   --delivery bale.delivery.yaml
 ```
 
-Bale publishes the captured content and tags, then the bundle's completion tag. Read [transfers](../transfers.md) for repository mappings and refreshing inputs, or [offline packaging](../offline.md) for archive and receiving-side details.
+Bale publishes the content and tags, then the completion tag. Continue with [transfers](../transfers.md) for repository mappings and refreshes, or [offline packaging](../offline.md) for receiving-side steps.

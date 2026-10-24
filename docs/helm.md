@@ -14,7 +14,7 @@ nix run --no-update-lock-file path:.#publish -- \
   helm-discovery registry.example.com/plugins/helm:1
 ```
 
-The layout contains the portable Wasm module in Bale's standard plugin profile. Publishing copies the built artifact; registry credentials and TLS settings are supplied at runtime. Additional plugin publishing arguments use ORAS copy options, such as `--to-registry-config` and `--to-ca-file`.
+The layout contains a discovery plugin archive with `plugin.yaml`, `plugin.wasm` and its license files. It follows Helm's package layout with Bale's `dependency/v1` and `wasi/preview1` metadata. Publishing copies the built artifact; registry credentials and TLS settings are supplied at runtime. Additional plugin publishing arguments use ORAS copy options, such as `--to-registry-config` and `--to-ca-file`.
 
 Replace the example registry references with your own chart and plugin. Select discovery in `bale.yaml`:
 
@@ -33,7 +33,7 @@ include:
           mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
 ```
 
-During creation, Bale reads the chart layer, runs discovery and captures the plugin, declaration and discovered images. All declared subcharts must already be packaged under `charts/`, including disabled dependencies. Discovery inspects rendered hooks without executing them.
+During creation, Bale reads the chart layer, extracts the packaged discovery module and captures the plugin, declaration and discovered images. All declared subcharts must already be packaged under `charts/`, including disabled dependencies. Discovery inspects rendered hooks without executing them.
 
 This recipe discovers the chart defaults. If deployment values introduce another image, add it as an ordinary recipe `include` entry, then write destination values after transfer. Bale does not generate deployment values or check that every override was captured. Optional discovery render inputs are described in the [request reference](reference/helm-discovery.md#request-fields).
 

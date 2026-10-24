@@ -6,6 +6,9 @@ test:
 helm-plugin-build:
     nix build --no-update-lock-file path:.#helm-plugin --out-link result-helm-plugin
 
+helm-plugin-package:
+    nix build --no-update-lock-file path:.#helm-plugin-archive --out-link result-helm-plugin-archive
+
 helm-plugin-check:
     nix build --no-update-lock-file path:.#checks.{{ arch() }}-linux.helm-plugin-integration --no-link
 

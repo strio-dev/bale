@@ -34,7 +34,7 @@ in
     ];
   };
   modRoot = "plugins/helm-relocate";
-  vendorHash = "sha256-Xm/PsFj5TLfXRTDe7Ei18OINRPfUmXOfhBA62d2oxLk=";
+  vendorHash = "sha256-w5YwXQtqy12fkfuPqM0z3MKT1WD1l8K4xI9uRtv9bec=";
   subPackages =
     if consumer == "helm" then
       [

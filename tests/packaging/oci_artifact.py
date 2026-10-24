@@ -27,7 +27,7 @@ roots = [
     for descriptor in index["manifests"]
     if descriptor.get("annotations", {}).get("org.opencontainers.image.ref.name") == "nix"
 ]
-assert len(roots) == 1
+assert len(roots) == len(index["manifests"]) == 1
 root = roots[0]
 assert root["mediaType"] == "application/vnd.oci.image.manifest.v1+json"
 manifest = json.loads(blob(root))
@@ -37,13 +37,9 @@ assert manifest.get("artifactType") == expected["artifactType"]
 assert "subject" not in manifest
 assert manifest["annotations"]["org.opencontainers.image.created"] == "1970-01-01T00:00:01Z"
 
-config = blob(manifest["config"])
-if expected["config"] is None:
-    assert manifest["config"]["mediaType"] == "application/vnd.oci.empty.v1+json"
-    assert config == b"{}"
-else:
-    assert manifest["config"]["mediaType"] == expected["config"]["mediaType"]
-    assert config == Path(expected["config"]["file"]).read_bytes()
+assert manifest["config"]["mediaType"] == "application/vnd.oci.empty.v1+json"
+assert blob(manifest["config"]) == b"{}"
+
 
 def verify_layers(manifest, sources):
     assert len(manifest["layers"]) == len(sources)
@@ -55,46 +51,4 @@ def verify_layers(manifest, sources):
 
 verify_layers(manifest, expected["layers"])
 
-attachments = []
-for descriptor in index["manifests"]:
-    if descriptor["digest"] == root["digest"]:
-        continue
-    assert descriptor["mediaType"] == root["mediaType"]
-    attachment = json.loads(blob(descriptor))
-    assert attachment["schemaVersion"] == 2
-    assert attachment["mediaType"] == descriptor["mediaType"]
-    subject = attachment["subject"]
-    for field in ("digest", "size", "mediaType"):
-        assert subject[field] == root[field]
-    assert attachment["annotations"]["org.opencontainers.image.created"] == "1970-01-01T00:00:01Z"
-    assert attachment["config"]["mediaType"] == "application/vnd.oci.empty.v1+json"
-    assert blob(attachment["config"]) == b"{}"
-    attachments.append(attachment)
-
-assert len(attachments) == len(expected["attachments"])
-for source in expected["attachments"]:
-    matches = [
-        attachment for attachment in attachments
-        if attachment["artifactType"] == source["artifactType"]
-        and [layer["digest"] for layer in attachment["layers"]]
-        == ["sha256:" + hashlib.sha256(Path(layer["file"]).read_bytes()).hexdigest()
-            for layer in source["layers"]]
-    ]
-    assert len(matches) == 1
-    attachment = matches[0]
-    verify_layers(attachment, source["layers"])
-    attachments.remove(attachment)
-assert not attachments
-
-if manifest["config"]["mediaType"] == "application/vnd.wasm.config.v0+json":
-    module_config = json.loads(config)
-    assert module_config["architecture"] == "wasm"
-    assert module_config["os"] == "wasip1"
-    assert module_config["layerDigests"] == [layer["digest"] for layer in manifest["layers"]]
-    assert len(manifest["layers"]) == 1
-    module = blob(manifest["layers"][0])
-    assert manifest["layers"][0]["mediaType"] == "application/wasm"
-    assert 8 <= len(module) <= 128 << 20
-    assert module[:8] == b"\x00asm\x01\x00\x00\x00"
-
-print("OCI distribution artifact verified: digests, payloads, referrers, media types and fixed creation time")
+print("OCI distribution artifact verified: digests, payloads, media types and fixed creation time")

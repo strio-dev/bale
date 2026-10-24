@@ -27,6 +27,7 @@ let
           "helm-consumer"
           "helm-consumer-archive"
           "helm-plugin-image"
+          "helm-plugin-archive"
           "helm-consumer-image"
           "distribution"
           "distribution-publish"

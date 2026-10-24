@@ -1,7 +1,9 @@
 package pluginoci
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,169 +11,208 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/wasmtest"
+	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/memory"
 )
 
 func packed(t *testing.T) (*memory.Store, v1.Descriptor, []byte) {
 	t.Helper()
-	data := wasmtest.Command(`{"dependencies":[]}`, 0)
-	path := filepath.Join(t.TempDir(), "plugin.wasm")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	module := wasmtest.Command(`{"schemaVersion":1,"dependencies":[]}`, 0)
+	raw := wasmtest.Package(module)
 	store := memory.New()
-	desc, err := Pack(context.Background(), store, path)
+	desc, err := Pack(context.Background(), store, packageFile(t, raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store, desc, data
+	return store, desc, module
 }
 
-func TestPackOpen(t *testing.T) {
-	store, desc, data := packed(t)
-	path := filepath.Join(t.TempDir(), "again.wasm")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+func packageFile(t *testing.T, raw []byte) string {
+	t.Helper()
+	name := filepath.Join(t.TempDir(), "discovery.tgz")
+	if err := os.WriteFile(name, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	again, err := Pack(context.Background(), store, path)
+	return name
+}
+
+func putJSON(t *testing.T, store content.Storage, mediaType string, value any) v1.Descriptor {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return put(t, store, mediaType, raw)
+}
+
+func put(t *testing.T, store content.Storage, mediaType string, raw []byte) v1.Descriptor {
+	t.Helper()
+	desc := content.NewDescriptorFromBytes(mediaType, raw)
+	if err := store.Push(context.Background(), desc, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	return desc
+}
+
+func manifest(t *testing.T, store content.ReadOnlyStorage, desc v1.Descriptor) v1.Manifest {
+	t.Helper()
+	raw, err := content.FetchAll(context.Background(), store, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value v1.Manifest
+	if err := json.Unmarshal(raw, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func TestPackOpenPreservesArchive(t *testing.T) {
+	store, desc, module := packed(t)
+	raw := wasmtest.Package(module)
+	again, err := Pack(context.Background(), store, packageFile(t, raw))
 	if err != nil || !content.Equal(desc, again) {
 		t.Fatalf("non-deterministic pack: %v %v", again, err)
 	}
-	module, err := Open(context.Background(), store, desc)
+	m := manifest(t, store, desc)
+	if m.ArtifactType != ArtifactType || m.Config.MediaType != v1.MediaTypeEmptyJSON || len(m.Layers) != 1 || m.Layers[0].MediaType != v1.MediaTypeImageLayerGzip || m.Layers[0].Annotations[v1.AnnotationTitle] != "discovery-0.0.0.tgz" {
+		t.Fatalf("unexpected profile: %#v", m)
+	}
+	got, err := content.FetchAll(context.Background(), store, m.Layers[0])
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("package archive changed: %v", err)
+	}
+	if !bytes.Contains(untar(t, got), []byte("Fixture license notice")) {
+		t.Fatal("package lost its license")
+	}
+	extracted, err := Open(context.Background(), store, desc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(module.Path)
-	if err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("module bytes changed: %v", err)
+	got, err = os.ReadFile(extracted.Path)
+	if err != nil || !bytes.Equal(got, module) {
+		t.Fatalf("module changed: %v", err)
 	}
-	fileInfo, _ := os.Stat(module.Path)
-	dirInfo, _ := os.Stat(filepath.Dir(module.Path))
+	fileInfo, _ := os.Stat(extracted.Path)
+	dirInfo, _ := os.Stat(filepath.Dir(extracted.Path))
 	if fileInfo.Mode().Perm() != 0o600 || dirInfo.Mode().Perm() != 0o700 {
 		t.Fatal("temporary module is not private")
 	}
-	if err := module.Close(); err != nil {
+	entries, err := os.ReadDir(filepath.Dir(extracted.Path))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("ancillary package files extracted to host: %v %v", entries, err)
+	}
+	if err := extracted.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(module.Path); !os.IsNotExist(err) {
-		t.Fatalf("temporary module remained: %v", err)
+	if _, err := os.Stat(extracted.Path); !os.IsNotExist(err) {
+		t.Fatalf("module remained: %v", err)
 	}
-	if err := module.Close(); err != nil {
+	if err := extracted.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestInvalidProfiles(t *testing.T) {
-	for _, name := range []string{"native", "wrong-os", "missing-digests", "wrong-digest", "multiple-layers", "wrong-layer", "wrong-config", "docker", "schema", "oversized-module", "oversized-config"} {
+	for _, name := range []string{"artifact-type", "config-type", "config-content", "config-size", "missing-layer", "layer-type", "too-many-layers", "wrong-title", "oversized-package", "schema", "subject", "media-type", "provenance-title"} {
 		t.Run(name, func(t *testing.T) {
 			store, desc, _ := packed(t)
-			manifestData, err := content.FetchAll(context.Background(), store, desc)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var manifest v1.Manifest
-			if err := json.Unmarshal(manifestData, &manifest); err != nil {
-				t.Fatal(err)
-			}
-			config := moduleConfig{Architecture: "wasm", OS: "wasip1", LayerDigests: []digest.Digest{manifest.Layers[0].Digest}}
+			m := manifest(t, store, desc)
 			switch name {
-			case "native":
-				config.Architecture = "amd64"
-			case "wrong-os":
-				config.OS = "linux"
-			case "missing-digests":
-				config.LayerDigests = nil
-			case "wrong-digest":
-				config.LayerDigests = []digest.Digest{digest.FromString("wrong")}
-			case "multiple-layers":
-				manifest.Layers = append(manifest.Layers, manifest.Layers[0])
-			case "wrong-layer":
-				manifest.Layers[0].MediaType = "application/octet-stream"
-			case "wrong-config":
-				manifest.Config.MediaType = v1.MediaTypeImageConfig
-			case "docker":
-				manifest.MediaType = "application/vnd.docker.distribution.manifest.v2+json"
+			case "artifact-type":
+				m.ArtifactType = "application/vnd.helm.plugin.v1+json"
+			case "config-type":
+				m.Config.MediaType = v1.MediaTypeImageConfig
+			case "config-content":
+				m.Config = putJSON(t, store, v1.MediaTypeEmptyJSON, map[string]string{"runtime": "native"})
+			case "config-size":
+				m.Config.Size = MaxMetadataBytes + 1
+			case "missing-layer":
+				m.Layers = nil
+			case "layer-type":
+				m.Layers[0].MediaType = "application/wasm"
+			case "too-many-layers":
+				m.Layers = append(m.Layers, m.Layers[0], m.Layers[0])
+			case "wrong-title":
+				m.Layers[0].Annotations[v1.AnnotationTitle] = "another-0.0.0.tgz"
+			case "oversized-package":
+				m.Layers[0].Size = MaxArchiveBytes + 1
 			case "schema":
-				manifest.SchemaVersion = 1
-			case "oversized-module":
-				manifest.Layers[0].Size = MaxModuleBytes + 1
+				m.SchemaVersion = 1
+			case "subject":
+				m.Subject = &desc
+			case "media-type":
+				m.MediaType = "application/vnd.docker.distribution.manifest.v2+json"
+			case "provenance-title":
+				m.Layers = append(m.Layers, m.Layers[0])
 			}
-			if name != "wrong-config" {
-				manifest.Config, err = pushJSON(context.Background(), store, MediaTypeConfig, config)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			if name == "oversized-config" {
-				manifest.Config.Size = MaxMetadataBytes + 1
-			}
-			desc, err = pushJSON(context.Background(), store, v1.MediaTypeImageManifest, manifest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			module, err := Open(context.Background(), store, desc)
-			if module != nil {
-				_ = module.Close()
-				t.Fatal("accepted invalid profile")
-			}
-			if err == nil {
-				t.Fatal("accepted invalid profile")
-			}
+			invalid := putJSON(t, store, v1.MediaTypeImageManifest, m)
+			rejectOpen(t, store, invalid)
 		})
 	}
 }
 
+func TestOptionalProvenance(t *testing.T) {
+	store, desc, _ := packed(t)
+	m := manifest(t, store, desc)
+	provenance := put(t, store, "application/octet-stream", []byte("untrusted provenance fixture"))
+	provenance.Annotations = map[string]string{v1.AnnotationTitle: "discovery-0.0.0.tgz.prov"}
+	m.Layers = append(m.Layers, provenance)
+	desc = putJSON(t, store, v1.MediaTypeImageManifest, m)
+	module, err := Open(context.Background(), store, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := module.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rejectOpen(t, tamperedStore{store, provenance.Digest, []byte("changed")}, desc)
+}
+
 func TestIndexSelection(t *testing.T) {
 	for _, count := range []int{0, 1, 2} {
-		t.Run(string(rune('0'+count)), func(t *testing.T) {
-			store, desc, data := packed(t)
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			store, desc, _ := packed(t)
 			index := v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex}
-			for i := 0; i < count; i++ {
+			for range count {
 				child := desc
 				child.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
 				index.Manifests = append(index.Manifests, child)
 			}
-			nativePath := filepath.Join(t.TempDir(), "native.wasm")
-			if err := os.WriteFile(nativePath, wasmtest.Command("wrong module", 0), 0600); err != nil {
-				t.Fatal(err)
-			}
-			native, err := Pack(context.Background(), store, nativePath)
-			if err != nil {
-				t.Fatal(err)
-			}
+			native := desc
 			native.Platform = &v1.Platform{Architecture: "amd64", OS: "linux"}
 			index.Manifests = append(index.Manifests, native)
-			root, err := pushJSON(context.Background(), store, v1.MediaTypeImageIndex, index)
-			if err != nil {
-				t.Fatal(err)
-			}
+			root := putJSON(t, store, v1.MediaTypeImageIndex, index)
 			module, err := Open(context.Background(), store, root)
 			if count == 1 {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer func() {
-					if err := module.Close(); err != nil {
-						t.Error(err)
-					}
-				}()
-				got, err := os.ReadFile(module.Path)
-				if err != nil || !bytes.Equal(got, data) {
-					t.Fatalf("wrong module selected: %v", err)
+				if err := module.Close(); err != nil {
+					t.Fatal(err)
 				}
 			} else if err == nil {
 				_ = module.Close()
-				t.Fatal("accepted ambiguous or absent platform")
+				t.Fatal("accepted absent or ambiguous platform")
 			}
 		})
 	}
+}
+
+func TestIndexRejectsNestedManifest(t *testing.T) {
+	store, desc, _ := packed(t)
+	desc.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
+	desc.MediaType = v1.MediaTypeImageIndex
+	index := v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex, Manifests: []v1.Descriptor{desc}}
+	rejectOpen(t, store, putJSON(t, store, v1.MediaTypeImageIndex, index))
 }
 
 type tamperedStore struct {
@@ -187,64 +228,42 @@ func (s tamperedStore) Fetch(ctx context.Context, desc v1.Descriptor) (io.ReadCl
 	return s.ReadOnlyStorage.Fetch(ctx, desc)
 }
 
-func TestVerifyAndCleanup(t *testing.T) {
-	for _, name := range []string{"truncated", "trailing", "digest", "component"} {
-		t.Run(name, func(t *testing.T) {
-			store, desc, data := packed(t)
-			var manifest v1.Manifest
-			manifestData, err := content.FetchAll(context.Background(), store, desc)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = json.Unmarshal(manifestData, &manifest); err != nil {
-				t.Fatal(err)
-			}
-			switch name {
-			case "truncated":
-				data = data[:len(data)-1]
-			case "trailing":
-				data = append(data, 0)
-			case "digest":
-				data[0] = 1
-			case "component":
-				data[4] = 13
-				manifest.Layers[0] = content.NewDescriptorFromBytes(MediaTypeModule, data)
-				manifest.Config, err = pushJSON(context.Background(), store, MediaTypeConfig, moduleConfig{Architecture: "wasm", OS: "wasip1", LayerDigests: []digest.Digest{manifest.Layers[0].Digest}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				desc, err = pushJSON(context.Background(), store, v1.MediaTypeImageManifest, manifest)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			tmp := t.TempDir()
-			t.Setenv("TMPDIR", tmp)
-			module, err := Open(context.Background(), tamperedStore{store, manifest.Layers[0].Digest, data}, desc)
-			if err == nil {
-				_ = module.Close()
-				t.Fatal("accepted tampered module")
-			}
-			entries, err := os.ReadDir(tmp)
-			if err != nil || len(entries) != 0 {
-				t.Fatalf("temporary module leaked: %v %v", entries, err)
-			}
-		})
+func rejectOpen(t *testing.T, store content.ReadOnlyStorage, desc v1.Descriptor) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	module, err := Open(context.Background(), store, desc)
+	if err == nil {
+		_ = module.Close()
+		t.Fatal("accepted invalid plugin")
+	}
+	entries, readErr := os.ReadDir(tmp)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("temporary module leaked: %v %v", entries, readErr)
 	}
 }
 
-func TestMetadataValidation(t *testing.T) {
+func TestIntegrityAndCleanup(t *testing.T) {
 	store, desc, _ := packed(t)
+	m := manifest(t, store, desc)
+	m.Config.Data = nil
+	desc = putJSON(t, store, v1.MediaTypeImageManifest, m)
+	for _, target := range []v1.Descriptor{desc, m.Config, m.Layers[0]} {
+		raw, err := content.FetchAll(context.Background(), store, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, changed := range [][]byte{raw[:len(raw)-1], append(append([]byte(nil), raw...), 0), bytes.Repeat([]byte{'x'}, len(raw))} {
+			rejectOpen(t, tamperedStore{store, target.Digest, changed}, desc)
+		}
+	}
 	for _, bad := range []v1.Descriptor{
 		{MediaType: v1.MediaTypeImageManifest, Digest: desc.Digest, Size: MaxMetadataBytes + 1},
 		{MediaType: v1.MediaTypeImageManifest, Digest: "bad", Size: 1},
 		{MediaType: v1.MediaTypeImageManifest, Digest: desc.Digest, Size: -1},
 		{MediaType: v1.MediaTypeImageManifest, Digest: desc.Digest, Size: desc.Size - 1},
 	} {
-		if module, err := Open(context.Background(), store, bad); err == nil {
-			_ = module.Close()
-			t.Fatalf("accepted bad metadata descriptor: %v", bad)
-		}
+		rejectOpen(t, store, bad)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -253,81 +272,285 @@ func TestMetadataValidation(t *testing.T) {
 	}
 }
 
-func TestPackRejectsUnsupportedSource(t *testing.T) {
-	for _, data := range [][]byte{[]byte("native cache"), {0, 97, 115, 109, 13, 0, 1, 0}, coreHeader[:4]} {
-		path := filepath.Join(t.TempDir(), "bad.wasm")
-		if err := os.WriteFile(path, data, 0o600); err != nil {
+type entry struct {
+	name     string
+	data     []byte
+	kind     byte
+	mode     int64
+	declared int64
+}
+
+func fixtureEntries(t *testing.T) []entry {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(wasmtest.Package(wasmtest.Command("{}", 0))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = gz.Close() }()
+	tr := tar.NewReader(gz)
+	var result []entry
+	for {
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Pack(context.Background(), memory.New(), path); err == nil {
-			t.Fatal("accepted unsupported source")
+		raw, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, entry{name: h.Name, data: raw, kind: h.Typeflag, mode: h.Mode})
+	}
+	return result
+}
+
+func archive(t *testing.T, entries []entry) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		mode := e.mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		kind := e.kind
+		if kind == 0 {
+			kind = tar.TypeReg
+		}
+		size := int64(len(e.data))
+		if e.declared != 0 {
+			size = e.declared
+		}
+		h := &tar.Header{Name: e.name, Mode: mode, Typeflag: kind, Size: size}
+		if kind == tar.TypeSymlink || kind == tar.TypeLink {
+			h.Linkname = "/outside"
+			h.Size = 0
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if len(e.data) > 0 {
+			if _, err := tw.Write(e.data); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if e.declared != 0 {
+			if err := gz.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return output.Bytes()
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func uncheckedArtifact(t *testing.T, raw []byte) (*memory.Store, v1.Descriptor) {
+	t.Helper()
+	store := memory.New()
+	blob := put(t, store, v1.MediaTypeImageLayerGzip, raw)
+	blob.Annotations = map[string]string{v1.AnnotationTitle: "discovery-0.0.0.tgz"}
+	desc, err := oras.PackManifest(context.Background(), store, oras.PackManifestVersion1_1, ArtifactType, oras.PackManifestOptions{Layers: []v1.Descriptor{blob}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store, desc
+}
+
+func TestArchiveBoundaries(t *testing.T) {
+	for _, name := range []string{"absolute", "traversal", "backslash", "noncanonical", "duplicate", "normalized-duplicate", "second-root", "root-file", "symlink", "hardlink", "device", "setuid", "missing-module", "nested-module", "component", "oversized-module", "oversized-metadata", "oversized-expanded", "too-many-files"} {
+		t.Run(name, func(t *testing.T) {
+			entries := fixtureEntries(t)
+			switch name {
+			case "absolute":
+				entries[2].name = "/outside"
+			case "traversal":
+				entries[2].name = "discovery/../outside"
+			case "backslash":
+				entries[2].name = `discovery\outside`
+			case "noncanonical":
+				entries[2].name = "discovery//outside"
+			case "duplicate":
+				entries = append(entries, entries[0])
+			case "normalized-duplicate":
+				other := entries[0]
+				other.name = "./" + other.name
+				entries = append(entries, other)
+			case "second-root":
+				entries[2].name = "other/LICENSE"
+			case "root-file":
+				entries[2].name = "discovery"
+			case "symlink":
+				entries[2].kind = tar.TypeSymlink
+				entries[2].data = nil
+			case "hardlink":
+				entries[2].kind = tar.TypeLink
+				entries[2].data = nil
+			case "device":
+				entries[2].kind = tar.TypeChar
+				entries[2].data = nil
+			case "setuid":
+				entries[2].mode = 0o4644
+			case "missing-module":
+				entries = append(entries[:1], entries[2:]...)
+			case "nested-module":
+				entries[1].name = "discovery/other/plugin.wasm"
+			case "component":
+				entries[1].data = []byte{0, 97, 115, 109, 13, 0, 1, 0}
+			case "oversized-module":
+				entries[1].declared = MaxModuleBytes + 1
+				entries[1].data = nil
+			case "oversized-metadata":
+				entries[0].declared = MaxMetadataBytes + 1
+				entries[0].data = nil
+			case "oversized-expanded":
+				entries[2].declared = MaxArchiveBytes + 1
+				entries[2].data = nil
+			case "too-many-files":
+				for i := len(entries); i <= maxArchiveEntries; i++ {
+					entries = append(entries, entry{name: fmt.Sprintf("discovery/notices/%d", i)})
+				}
+			}
+			raw := archive(t, entries)
+			if _, err := Pack(context.Background(), memory.New(), packageFile(t, raw)); err == nil {
+				t.Fatal("published invalid archive")
+			}
+			store, desc := uncheckedArtifact(t, raw)
+			rejectOpen(t, store, desc)
+		})
+	}
+}
+
+func TestMetadataContract(t *testing.T) {
+	for _, name := range []string{"unknown", "duplicate", "alias", "multidoc", "api", "type", "runtime", "name", "version", "numeric-version", "wrong-root", "missing"} {
+		t.Run(name, func(t *testing.T) {
+			entries := fixtureEntries(t)
+			raw := string(entries[0].data)
+			switch name {
+			case "unknown":
+				raw += "config: {}\n"
+			case "duplicate":
+				raw += "name: discovery\n"
+			case "alias":
+				raw = strings.Replace(raw, "name: discovery", "name: &name discovery\nextra: *name", 1)
+			case "multidoc":
+				raw += "---\nname: other\n"
+			case "api":
+				raw = strings.Replace(raw, "apiVersion: v1", "apiVersion: v2", 1)
+			case "type":
+				raw = strings.Replace(raw, "type: dependency/v1", "type: cli/v1", 1)
+			case "runtime":
+				raw = strings.Replace(raw, "runtime: wasi/preview1", "runtime: subprocess", 1)
+			case "name":
+				raw = strings.Replace(raw, "name: discovery", "name: ../outside", 1)
+			case "version":
+				raw = strings.Replace(raw, "version: 0.0.0", "version: 01.0.0", 1)
+			case "numeric-version":
+				raw = strings.Replace(raw, "version: 0.0.0", "version: 1", 1)
+			case "wrong-root":
+				raw = strings.Replace(raw, "name: discovery", "name: other", 1)
+			case "missing":
+				raw = strings.Replace(raw, "runtime: wasi/preview1\n", "", 1)
+			}
+			entries[0].data = []byte(raw)
+			store, desc := uncheckedArtifact(t, archive(t, entries))
+			rejectOpen(t, store, desc)
+		})
+	}
+	for _, version := range []string{"0.0.0", "1.2.3", "1.2.3-rc.1+build.001", "1.2.3+packaging"} {
+		if !validVersion(version) {
+			t.Fatalf("rejected SemVer %s", version)
+		}
+	}
+	for _, version := range []string{"v1.2.3", "1.2", "01.2.3", "1.02.3", "1.2.3-01", "1.2.3-", "1.2.3+", "1.2.3+a+b", "1.2.3-a..b"} {
+		if validVersion(version) {
+			t.Fatalf("accepted non-SemVer %s", version)
+		}
+	}
+}
+
+func untar(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	gz, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = gz.Close() }()
+	value, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+func compress(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	if _, err := gz.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func TestCompleteArchiveTrailers(t *testing.T) {
+	raw := wasmtest.Package(wasmtest.Command("{}", 0))
+	plain := untar(t, raw)
+	for _, bad := range [][]byte{
+		raw[:len(raw)-1], append(append([]byte(nil), raw...), 0), append(append([]byte(nil), raw...), raw...),
+		compress(t, plain[:len(plain)-512]), compress(t, append(append([]byte(nil), plain...), []byte("hidden data")...)),
+	} {
+		store, desc := uncheckedArtifact(t, bad)
+		rejectOpen(t, store, desc)
+	}
+	// Ordinary GNU tar directory entries and block padding are accepted.
+	entries := append([]entry{{name: "discovery/", kind: tar.TypeDir}}, fixtureEntries(t)...)
+	if _, err := Pack(context.Background(), memory.New(), packageFile(t, archive(t, entries))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
+
+func TestExpandedTrailerLimit(t *testing.T) {
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	plain := untar(t, wasmtest.Package(wasmtest.Command("{}", 0)))
+	if _, err := gz.Write(plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.CopyN(gz, zeroReader{}, MaxArchiveBytes); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Pack(context.Background(), memory.New(), packageFile(t, output.Bytes())); err == nil {
+		t.Fatal("accepted gzip expansion beyond archive bound")
+	}
+}
+
+func TestPackRejectsRawModuleAndDirectory(t *testing.T) {
+	for _, raw := range [][]byte{wasmtest.Command("{}", 0), []byte("native cache"), {0, 97, 115, 109, 13, 0, 1, 0}} {
+		if _, err := Pack(context.Background(), memory.New(), packageFile(t, raw)); err == nil {
+			t.Fatal("accepted raw module or native source")
 		}
 	}
 	if _, err := Pack(context.Background(), memory.New(), t.TempDir()); err == nil {
 		t.Fatal("accepted directory")
 	}
-}
-
-func TestMetadataIntegrity(t *testing.T) {
-	store, desc, _ := packed(t)
-	data, err := content.FetchAll(context.Background(), store, desc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, changed := range [][]byte{data[:len(data)-1], append(append([]byte(nil), data...), ' '), bytes.Repeat([]byte{' '}, len(data))} {
-		if module, err := Open(context.Background(), tamperedStore{store, desc.Digest, changed}, desc); err == nil {
-			_ = module.Close()
-			t.Fatal("accepted unverified metadata")
-		}
-	}
-}
-
-func TestIndexRejectsUnsupportedChild(t *testing.T) {
-	store, desc, _ := packed(t)
-	desc.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
-	desc.MediaType = v1.MediaTypeImageIndex
-	index := v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex, Manifests: []v1.Descriptor{desc}}
-	root, err := pushJSON(context.Background(), store, v1.MediaTypeImageIndex, index)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if module, err := Open(context.Background(), store, root); err == nil {
-		_ = module.Close()
-		t.Fatal("accepted nested index")
-	}
-}
-
-func TestConfigMetadataAndArtifactTypeAllowed(t *testing.T) {
-	store, desc, _ := packed(t)
-	data, err := content.FetchAll(context.Background(), store, desc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest v1.Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	manifest.Config, err = pushJSON(context.Background(), store, MediaTypeConfig, map[string]any{
-		"architecture": "wasm", "os": "wasip1", "layerDigests": []digest.Digest{manifest.Layers[0].Digest},
-		"author": "an ecosystem producer", "config": map[string]any{"producer": "another tool"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest.ArtifactType = "application/vnd.wasm.content.layer.v1+wasm"
-	desc, err = pushJSON(context.Background(), store, v1.MediaTypeImageManifest, manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	module, err := Open(context.Background(), store, desc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := module.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
 }
 
 type changingStore struct {
@@ -336,111 +559,85 @@ type changingStore struct {
 }
 
 func (s changingStore) Push(ctx context.Context, desc v1.Descriptor, reader io.Reader) error {
-	if desc.MediaType == MediaTypeModule {
-		if err := os.WriteFile(s.path, []byte("source changed after first-pass hash"), 0o600); err != nil {
+	if desc.MediaType == v1.MediaTypeImageLayerGzip {
+		if err := os.WriteFile(s.path, []byte("changed after first-pass validation"), 0o600); err != nil {
 			return err
 		}
 	}
 	return s.Storage.Push(ctx, desc, reader)
 }
-
 func TestPackDetectsSourceChange(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "module.wasm")
-	if err := os.WriteFile(path, wasmtest.Command("{}", 0), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Pack(context.Background(), changingStore{memory.New(), path}, path); err == nil {
-		t.Fatal("accepted source modified after hashing")
+	name := packageFile(t, wasmtest.Package(wasmtest.Command("{}", 0)))
+	if _, err := Pack(context.Background(), changingStore{memory.New(), name}, name); err == nil {
+		t.Fatal("published changed package")
 	}
 }
 
 func inlineJSON(t *testing.T, mediaType string, value any) v1.Descriptor {
 	t.Helper()
-	data, err := json.Marshal(value)
+	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	desc := content.NewDescriptorFromBytes(mediaType, data)
-	desc.Data = data
+	desc := content.NewDescriptorFromBytes(mediaType, raw)
+	desc.Data = raw
 	return desc
 }
-
 func inlinePlugin(t *testing.T, corrupt string) (v1.Descriptor, []byte) {
 	t.Helper()
-	data := wasmtest.Command(`{"schemaVersion":1,"dependencies":[]}`, 0)
-	blob := content.NewDescriptorFromBytes(MediaTypeModule, data)
-	blob.Data = append([]byte(nil), data...)
+	module := wasmtest.Command(`{"schemaVersion":1,"dependencies":[]}`, 0)
+	raw := wasmtest.Package(module)
+	blob := content.NewDescriptorFromBytes(v1.MediaTypeImageLayerGzip, raw)
+	blob.Data = append([]byte(nil), raw...)
+	blob.Annotations = map[string]string{v1.AnnotationTitle: "discovery-0.0.0.tgz"}
 	switch corrupt {
-	case "module digest":
+	case "archive digest":
 		blob.Data[0] = 1
-	case "module truncated":
+	case "archive truncated":
 		blob.Data = blob.Data[:len(blob.Data)-1]
-	case "module trailing":
+	case "archive trailing":
 		blob.Data = append(blob.Data, 0)
 	}
-	config := inlineJSON(t, MediaTypeConfig, moduleConfig{Architecture: "wasm", OS: "wasip1", LayerDigests: []digest.Digest{blob.Digest}})
+	config := inlineJSON(t, v1.MediaTypeEmptyJSON, map[string]any{})
 	if corrupt == "config" {
 		config.Data = append(config.Data, ' ')
 	}
-	manifest := inlineJSON(t, v1.MediaTypeImageManifest, v1.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageManifest,
-		Config: config, Layers: []v1.Descriptor{blob},
-	})
+	manifest := inlineJSON(t, v1.MediaTypeImageManifest, v1.Manifest{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageManifest, ArtifactType: ArtifactType, Config: config, Layers: []v1.Descriptor{blob}})
 	if corrupt == "manifest" {
 		manifest.Data[0] = '!'
 	}
 	manifest.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
-	index := inlineJSON(t, v1.MediaTypeImageIndex, v1.Index{
-		Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex,
-		Manifests: []v1.Descriptor{manifest},
-	})
+	index := inlineJSON(t, v1.MediaTypeImageIndex, v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex, Manifests: []v1.Descriptor{manifest}})
 	if corrupt == "index" {
 		index.Data = index.Data[:len(index.Data)-1]
 	}
-	return index, data
+	return index, module
 }
 
 type noFetchStore struct{ content.ReadOnlyStorage }
 
-func (s noFetchStore) Fetch(context.Context, v1.Descriptor) (io.ReadCloser, error) {
-	return nil, errors.New("inline descriptor unexpectedly fetched from backing storage")
+func (noFetchStore) Fetch(context.Context, v1.Descriptor) (io.ReadCloser, error) {
+	return nil, errors.New("inline descriptor unexpectedly fetched")
 }
-
-func TestInlinePluginWithoutBackingObjects(t *testing.T) {
-	desc, data := inlinePlugin(t, "")
-	module, err := Open(context.Background(), noFetchStore{memory.New()}, desc)
+func TestInlineDescriptorVerification(t *testing.T) {
+	store := noFetchStore{memory.New()}
+	desc, want := inlinePlugin(t, "")
+	module, err := Open(context.Background(), store, desc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := module.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
 	got, err := os.ReadFile(module.Path)
-	if err != nil || !bytes.Equal(got, data) {
-		t.Fatalf("inline module bytes changed: %v", err)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatal("inline module changed")
+	}
+	if err := module.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"index", "manifest", "config", "archive digest", "archive truncated", "archive trailing"} {
+		bad, _ := inlinePlugin(t, name)
+		rejectOpen(t, store, bad)
 	}
 }
-
-func TestInlinePluginIntegrityAndCleanup(t *testing.T) {
-	for _, corrupt := range []string{"index", "manifest", "config", "module digest", "module truncated", "module trailing"} {
-		t.Run(corrupt, func(t *testing.T) {
-			desc, _ := inlinePlugin(t, corrupt)
-			tmp := t.TempDir()
-			t.Setenv("TMPDIR", tmp)
-			if module, err := Open(context.Background(), noFetchStore{memory.New()}, desc); err == nil {
-				_ = module.Close()
-				t.Fatal("accepted corrupt inline data")
-			}
-			entries, err := os.ReadDir(tmp)
-			if err != nil || len(entries) != 0 {
-				t.Fatalf("inline module leaked: %v %v", entries, err)
-			}
-		})
-	}
-}
-
 func TestOptionalEnvelopeMediaTypes(t *testing.T) {
 	for _, indexed := range []bool{false, true} {
 		for _, value := range []string{"omitted", `""`, `null`, `12`, `false`, `{}`, `[]`, `"application/unsupported"`} {
@@ -458,16 +655,16 @@ func TestOptionalEnvelopeMediaTypes(t *testing.T) {
 				if !indexed && value != "omitted" {
 					fields["mediaType"] = json.RawMessage(value)
 				}
-				manifest := inlineJSON(t, v1.MediaTypeImageManifest, fields)
+				m := inlineJSON(t, v1.MediaTypeImageManifest, fields)
 				if indexed {
-					manifest.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
-					index.Manifests = []v1.Descriptor{manifest}
-					indexData, err := json.Marshal(index)
+					m.Platform = &v1.Platform{Architecture: "wasm", OS: "wasip1"}
+					index.Manifests = []v1.Descriptor{m}
+					raw, err := json.Marshal(index)
 					if err != nil {
 						t.Fatal(err)
 					}
 					fields = nil
-					if err := json.Unmarshal(indexData, &fields); err != nil {
+					if err := json.Unmarshal(raw, &fields); err != nil {
 						t.Fatal(err)
 					}
 					delete(fields, "mediaType")
@@ -476,7 +673,7 @@ func TestOptionalEnvelopeMediaTypes(t *testing.T) {
 					}
 					root = inlineJSON(t, v1.MediaTypeImageIndex, fields)
 				} else {
-					root = manifest
+					root = m
 				}
 				module, err := Open(context.Background(), noFetchStore{memory.New()}, root)
 				if value == "omitted" {
@@ -488,9 +685,34 @@ func TestOptionalEnvelopeMediaTypes(t *testing.T) {
 					}
 				} else if err == nil {
 					_ = module.Close()
-					t.Fatal("accepted conflicting or non-string mediaType")
+					t.Fatal("accepted invalid envelope mediaType")
 				}
 			})
+		}
+	}
+}
+
+type postStreamErrorReader struct {
+	*bytes.Reader
+	err error
+}
+
+func (r postStreamErrorReader) Read(buffer []byte) (int, error) {
+	n, err := r.Reader.Read(buffer)
+	if errors.Is(err, io.EOF) {
+		return n, r.err
+	}
+	return n, err
+}
+
+func TestArchivePreservesPostStreamError(t *testing.T) {
+	for _, cause := range []error{errors.New("post-stream I/O failure"), context.Canceled} {
+		reader := postStreamErrorReader{
+			Reader: bytes.NewReader(wasmtest.Package(wasmtest.Command("{}", 0))),
+			err:    cause,
+		}
+		if _, err := readArchive(context.Background(), reader, io.Discard); !errors.Is(err, cause) {
+			t.Fatalf("lost post-stream error %v: %v", cause, err)
 		}
 	}
 }

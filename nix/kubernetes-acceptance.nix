@@ -1,7 +1,7 @@
 {
   pkgs,
   bale,
-  helm-plugin,
+  helm-plugin-archive,
   helm-consumer-archive,
   flux-service-image,
   flux-service-chart,
@@ -31,7 +31,7 @@ let
       '';
   guestConfig = {
     bale = "${bale}/bin/bale";
-    helmPlugin = "${helm-plugin}/lib/bale/plugins/helm.wasm";
+    helmPlugin = "${helm-plugin-archive}/${helm-plugin-archive.archiveName}";
     nativePluginArchive = "${helm-consumer-archive}/${helm-consumer-archive.archiveName}";
     fixture = "${fixtures}/bin/fixture";
     workload = "${fixtures}/bin/workload";

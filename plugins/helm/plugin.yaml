@@ -1,0 +1,5 @@
+apiVersion: v1
+name: helm-discovery
+version: 0.0.0
+type: dependency/v1
+runtime: wasi/preview1

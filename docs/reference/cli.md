@@ -14,7 +14,7 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 | `dependencies generate` / `attach` | Produce or attach a dependency declaration. |
 | `dependencies list` / `inspect` | Read declaration descriptors or payloads. |
 | `destinations inspect` | Read delivered dependency mappings for an artifact. |
-| `plugins push` | Publish a portable discovery module as an OCI artifact. |
+| `plugins push` | Publish a discovery plugin `.tgz` package as an OCI artifact. |
 | `version` | Print the CLI version. |
 
 `-f` means `--file` for creation and authoring commands, and `--format` for inspection and comparison. Repeat `--plain-http` and `--map` when needed; duplicate single-value options are rejected.

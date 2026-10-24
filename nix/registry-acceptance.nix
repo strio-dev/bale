@@ -1,6 +1,6 @@
 {
   bale,
-  helm-plugin,
+  helm-plugin-archive,
   helm-consumer-archive,
   flux-service-image,
   flux-service-chart,
@@ -33,7 +33,7 @@ writeShellApplication {
     export BALE_ACCEPTANCE_BINARY=${bale-cli}
     export BALE_ACCEPTANCE_DISTRIBUTION=${distribution}/bin/registry
     export BALE_ACCEPTANCE_ZOT=${zot}/bin/zot
-    export BALE_ACCEPTANCE_HELM_PLUGIN=${helm-plugin}/lib/bale/plugins/helm.wasm
+    export BALE_ACCEPTANCE_HELM_PLUGIN=${helm-plugin-archive}/${helm-plugin-archive.archiveName}
     export BALE_ACCEPTANCE_HELM=${kubernetes-helm}/bin/helm
     export BALE_ACCEPTANCE_HELM_CONSUMER_ARCHIVE=${helm-consumer-archive}/${helm-consumer-archive.archiveName}
     export BALE_ACCEPTANCE_FLUX_IMAGE=${flux-service-image}

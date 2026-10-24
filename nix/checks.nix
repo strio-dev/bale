@@ -7,6 +7,7 @@
   wasm-contract-fixture,
   docs,
   helm-plugin,
+  helm-plugin-archive,
   helm-consumer,
   helm-consumer-archive,
   helm-plugin-image,
@@ -47,6 +48,7 @@ in
   go-check = quality;
   inherit
     helm-plugin
+    helm-plugin-archive
     helm-consumer
     helm-consumer-archive
     helm-plugin-image
@@ -60,6 +62,7 @@ in
     pname = "bale-helm-plugin-integration";
     env = old.env // {
       BALE_HELM_PLUGIN = "${helm-plugin}/lib/bale/plugins/helm.wasm";
+      BALE_HELM_PLUGIN_ARCHIVE = "${helm-plugin-archive}/${helm-plugin-archive.archiveName}";
     };
     checkPhase = ''
       export HOME="$TMPDIR"

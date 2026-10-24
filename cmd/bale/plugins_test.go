@@ -16,6 +16,7 @@ import (
 	specs "github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale"
+	"github.com/strio-dev/bale/internal/wasmtest"
 	"oras.land/oras-go/v2/content"
 )
 
@@ -142,9 +143,42 @@ func TestOCIPluginCLI(t *testing.T) {
 	}
 	module, input := pluginFiles(t, `{"schemaVersion":1,"context":"configured","dependencies":[]}`, 0)
 	pluginRef := host + "/producer:dev"
-	var published pluginPushResult
-	if err := json.Unmarshal(invoke("plugins", "push", "-f", module, pluginRef, "-q", "--format=json"), &published); err != nil {
+	var rejectedOut, rejectedErr bytes.Buffer
+	if code := run([]string{"plugins", "push", "-f", module, pluginRef, "-q", "--plain-http", host}, &rejectedOut, &rejectedErr); code != 125 || rejectedOut.Len() != 0 || rejectedErr.Len() == 0 {
+		t.Fatalf("raw module publication accepted: code %d stdout %s stderr %s", code, &rejectedOut, &rejectedErr)
+	}
+	mu.Lock()
+	rawModuleWrites := writes["producer"]
+	mu.Unlock()
+	if rawModuleWrites != 0 {
+		t.Fatal("raw module rejection wrote registry content")
+	}
+	moduleBytes, err := os.ReadFile(module)
+	if err != nil {
 		t.Fatal(err)
+	}
+	packageBytes := wasmtest.Package(moduleBytes)
+	packagePath := filepath.Join(t.TempDir(), "discovery-0.0.0.tgz")
+	if err := os.WriteFile(packagePath, packageBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var published pluginPushResult
+	if err := json.Unmarshal(invoke("plugins", "push", "-f", packagePath, pluginRef, "-q", "--format=json"), &published); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	publishedManifest := objects["producer@"+published.Descriptor.Digest.String()]
+	mu.Unlock()
+	var pluginManifest v1.Manifest
+	if err := json.Unmarshal(publishedManifest.raw, &pluginManifest); err != nil || pluginManifest.ArtifactType != "application/vnd.bale.plugin.v1+json" || len(pluginManifest.Layers) != 1 {
+		t.Fatalf("published plugin manifest: %+v %v", pluginManifest, err)
+	}
+	packageLayer := pluginManifest.Layers[0]
+	mu.Lock()
+	publishedPackage := objects["producer@"+packageLayer.Digest.String()]
+	mu.Unlock()
+	if packageLayer.MediaType != v1.MediaTypeImageLayerGzip || packageLayer.Annotations[v1.AnnotationTitle] != "discovery-0.0.0.tgz" || !bytes.Equal(publishedPackage.raw, packageBytes) {
+		t.Fatal("publication changed the plugin archive or its descriptor")
 	}
 	generated := invoke("dependencies", "generate", "--plugin", pluginRef, "--input", input, "--plugin-cache=")
 	declaration, err := bale.ParseDependencyDeclaration(generated)
@@ -233,6 +267,11 @@ func TestOCIPluginCLI(t *testing.T) {
 	}
 	layout := filepath.Join(t.TempDir(), "locked")
 	invoke("pull", bundleRef, layout, "-q")
+	algorithm, encoded, _ := strings.Cut(packageLayer.Digest.String(), ":")
+	capturedPackage, err := os.ReadFile(filepath.Join(layout, "blobs", algorithm, encoded))
+	if err != nil || !bytes.Equal(capturedPackage, packageBytes) {
+		t.Fatalf("captured plugin archive changed: %v", err)
+	}
 	latest := filepath.Join(t.TempDir(), "latest")
 	var out, errs bytes.Buffer
 	if code := run([]string{"pull", bundleRef, latest, "--mode=latest", "--plain-http", host, "-q"}, &out, &errs); code != 125 || !strings.Contains(errs.String(), "plugin") || out.Len() != 0 {

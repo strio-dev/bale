@@ -1,38 +1,36 @@
-# Transfers
+# Transfer artifacts
 
-Capture artifacts once, then choose where to deliver them. Follow [your first bundle](tutorials/first-bundle.md) for a complete local walkthrough, or read [how bundles work](concepts/bundles.md) for the lifecycle.
+Capture artifacts from a [recipe](recipes.md), then choose a destination when you deliver. For a complete local workflow, follow [your first bundle](tutorials/first-bundle.md).
 
-The examples below assume an existing [recipe](recipes.md) and registry paths you can access. Replace `registry.example.com` and `mirror.example.com` with your registries.
+Replace the registry names below with repositories you can access.
 
 ## Create a bundle
 
-Capture into a new local OCI layout with read access to your sources:
+Capture into a new local OCI layout and export its delivery paths:
 
 ```sh
 bale create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
 ```
 
-To store the bundle in a registry instead:
+Use new paths for the layout and delivery file. Even with `--layout`, capture requires read access to the source registries. To store the bundle in a holding registry instead:
 
 ```sh
 bale create -f bale.yaml registry.example.com/bundles/release:v1
 ```
 
-Registry creation places the complete captured graph in the bundle repository. Both forms preserve artifact bytes and digests and run any configured [discovery plugins](plugins.md).
+Registry creation also requires write access to that holding repository; it does not publish members to their delivery paths. Both forms preserve the captured bytes and digests, include the complete graph, and run configured [discovery plugins](plugins.md).
 
-Preview capture without retaining a layout or publishing content:
+Preview the capture first with:
 
 ```sh
 bale create --layout -f bale.yaml ./preview --dry-run
 ```
 
-The preview resolves inputs and runs discovery, then shows pinned artifacts and why they were included. A later create captures again; the preview does not reserve tags or retain content. See [CLI output](reference/cli.md) for JSON and templates.
+The preview reads source registries, resolves tags and runs configured discovery plugins without retaining or publishing a bundle. A later create resolves inputs again. Without `--layout`, a create preview also checks the holding registry for tag conflicts.
 
 ## Export delivery paths
 
-Use `--output-delivery FILE` during create, including a dry run, to export paths from that exact capture. You can also [export later](inspection.md#export-delivery-yaml) from a stored bundle or layout. The output path must be new.
-
-The generated YAML binds paths to a bundle digest and lists captured manifests and indexes, including dependencies, plugins, attachments and nested inventories. Opaque configs and payload blobs have no editable rows. An abbreviated example:
+Use `--output-delivery FILE` during create, including a dry run, or [export later](inspection.md#export-delivery-yaml). The file names captured artifacts and their paths under the destination bundle repository:
 
 ```yaml
 bundle: sha256:<bundle-digest>
@@ -43,16 +41,11 @@ artifacts:
     path: images/web
 ```
 
-Keep the generated digests and `ref` values; edit only the paths. A path is relative to the destination bundle repository: `images/web` under `mirror.example.com/releases/v1:bundle` becomes `mirror.example.com/releases/v1/images/web`.
+Edit only `path` values. For example, `images/web` under `mirror.example.com/releases/v1:bundle` publishes to `mirror.example.com/releases/v1/images/web`.
 
-```sh
-bale push ./release mirror.example.com/releases/v1:bundle \
-  --delivery bale.delivery.yaml --dry-run
-```
+Omitted rows remain included with default mapping. Bale may make additional copies to keep related OCI content together. Paths control publication locations; they leave chart and application content unchanged. See [delivery file rules](reference/cli.md#delivery-files) for identity, validation and mapping precedence.
 
-Artifact paths override repository-wide `--map` values. Omitted rows use normal mapping and remain included. Unknown or duplicate identities, invalid paths and mismatched bundle digests fail before publication. Required graph and referrer relationships may create additional colocated copies. Path edits do not rewrite references inside chart or application payloads.
-
-Keep authored files separately: exporting again regenerates defaults. After refreshing a bundle, [update the delivery file](delivery-updates.md) to carry path edits forward.
+Keep your edited file: exporting again generates defaults. [Update it](delivery-updates.md) when you refresh the bundle.
 
 ## Locked and latest pulls
 
@@ -61,16 +54,14 @@ bale pull registry.example.com/bundles/release:v1 ./release
 bale pull registry.example.com/bundles/release:v1 ./refreshed --mode latest
 ```
 
-The default locked pull uses captured digests and needs only the bundle registry when its graph is complete. It neither resolves original selectors nor executes plugins.
-
-Latest pull recaptures the recipe and resolves source, dependency and plugin tags again, even if an input's digest has not changed. Recipes with discovery plugins require explicit execution permission:
+The default **locked** pull retrieves captured digests without running plugins. **Latest** recaptures the recipe from its sources and resolves source, dependency and plugin tags again, even when an input digest is unchanged. Permit configured plugins explicitly:
 
 ```sh
 bale pull registry.example.com/bundles/release:v1 ./refreshed \
   --mode latest --allow-plugins
 ```
 
-Included nested Bale bundles retain their captured graphs in either mode. Pull requires a new layout path. [Compare snapshots](inspection.md#compare-snapshots) before delivering a refresh.
+Nested Bale bundles retain their captured graphs in either mode. Pull requires a new layout path. [Compare snapshots](inspection.md#compare-snapshots) before delivering the refresh.
 
 ## Push to a destination
 
@@ -83,19 +74,17 @@ bale push ./release mirror.example.com/releases/v1:bundle \
   --delivery bale.delivery.yaml
 ```
 
-The preview validates the complete local graph and shows artifact locations, required copies, restored tags, destination attachments and the completion tag. It makes no network requests, reads no registry credentials and runs no plugins. Destination access and existing remote tags are checked during actual push.
+The preview validates the local graph and shows publication locations without network access, credentials or plugin execution. Actual push checks destination access and existing tags.
 
-Without a delivery file, member paths preserve source repository paths below the bundle repository. Map an entire source repository with repeated `--map SOURCE_REPO=RELATIVE_PATH` options:
+Without a delivery file, source repository paths are preserved beneath the bundle repository, omitting the source registry hostname. For example, `ghcr.io/example/web` maps beneath `mirror.example.com/releases/v1:bundle` to `mirror.example.com/releases/v1/example/web`. Map a whole repository with repeatable `--map` options:
 
 ```sh
 bale push ./release mirror.example.com/releases/v1:bundle \
   --map registry.example.com/apps/api=api
 ```
 
-Push preserves content bytes and publishes [destination records](destinations.md) at primary artifact locations. It then restores aliases and publishes the completion tag. Conflicting repository assignments or existing tags with different digests fail. Multiple tag updates are not atomic; retrying the same push reuses uploaded content and repairs incomplete publication.
-
-The bundle repository retains the complete captured graph. Check [registry retention](registry.md#retention-and-garbage-collection) before enabling cleanup policies.
+Push publishes content, [destination records](destinations.md) and aliases, then the completion tag. Tag updates across repositories are not atomic. Retry the same push to reuse uploaded content and repair incomplete publication. Configure [retention](registry.md#retention-and-garbage-collection) for both bundle and member repositories.
 
 ## Output and errors
 
-See [CLI output and errors](reference/cli.md) for digest output, JSON reports, progress, templates and partial results. A failed push can leave confirmed publications; its completion tag is not a transaction across member repositories.
+See [CLI output](reference/cli.md) for JSON, templates and partial reports, and [publication behavior](reference/cli.md#publication) for conflicts and retries.

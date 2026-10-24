@@ -1,4 +1,4 @@
-# Recipes
+# Recipe syntax
 
 A recipe selects what to capture. Write it in YAML; Bale stores the normalized recipe and captured inventory as JSON. Delivery paths belong in a separate [delivery file](transfers.md#export-delivery-paths), so choosing a destination does not require capturing again.
 
@@ -26,7 +26,7 @@ include:
 | `dependencies` | Declaration-following policy; defaults to `follow: auto`. |
 | `plugin` | Optional OCI discovery plugin and its input. |
 
-Creation pins selected digests and preserves complete multiarchitecture graphs. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Unknown and duplicate YAML fields are rejected.
+Creation pins selected digests and preserves complete multiarchitecture graphs. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Recipes contain exactly one YAML document. Unknown and duplicate fields, aliases, anchors and YAML merge keys are rejected. Outside `plugin.input`, scalar values must be nonempty strings without surrounding whitespace; quote numeric-looking tags as shown above.
 
 ## Discover dependencies with a plugin
 

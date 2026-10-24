@@ -4,7 +4,7 @@ Implement a WASI Preview 1 command to produce a Bale [dependency declaration](..
 
 ## Module contract
 
-The guest exports the standard WASI command entry point, `_start`. It receives one plugin-defined UTF-8 JSON request on stdin. Its only argument is `bale-plugin`; Bale does not pass host environment variables, mount host filesystems, or provide network access. Supply values and application inputs using a schema defined by that plugin. Recipe blob bindings can supply archive bytes from the selected artifact.
+The guest exports the standard WASI command entry point, `_start`. It receives one plugin-defined UTF-8 JSON request on stdin. Its only argument is `bale-plugin`; Bale does not pass host environment variables, mount host filesystems, or provide network access. Supply values and application inputs using the plugin’s schema. Recipe inputs preserve JSON types; blob bindings can supply archive bytes from the selected artifact. Captures retain literal inputs and binding definitions, not the injected archive bytes.
 
 On success, stdout must contain one UTF-8 JSON dependency declaration with `schemaVersion: 1`:
 
@@ -98,7 +98,7 @@ type: dependency/v1
 runtime: wasi/preview1
 ```
 
-The package contains one directory named after the plugin, with `plugin.yaml` and the fixed module path `plugin.wasm`. Add your `LICENSE` and applicable third-party license and notice files to that directory before packaging.
+The package contains one directory named after the plugin, with `plugin.yaml` and the fixed module path `plugin.wasm`. All five metadata fields are required; unknown or duplicate fields, aliases and extra YAML documents are rejected. `name` starts with an ASCII letter or digit and contains only ASCII letters, digits, `_` and `-`. `version` is strict SemVer, such as `1.0.0` or `1.0.0-rc.1`; the resulting `name-version.tgz` title must fit in 255 bytes. Add your `LICENSE` and applicable third-party license and notice files to that directory before packaging.
 
 From a Bale checkout, use the pinned archive tools and publish the result:
 
@@ -108,22 +108,32 @@ nix develop --no-update-lock-file path:.#release --command \
 bale plugins push -f references-1.0.0.tgz registry.example.com/plugins/references:1
 ```
 
-This follows Helm's archive-inside-OCI distribution pattern. The metadata identifies Bale's dependency protocol and WASI runtime; it is not a Helm-installable plugin. Bale validates the package and runs its module directly, without executing host commands from metadata. License files stay inside the same archive layer.
+`bale plugins push` accepts the packaged `.tgz`, not a raw Wasm module. It publishes OCI artifact type `application/vnd.bale.plugin.v1+json`, with an empty JSON config and one `application/vnd.oci.image.layer.v1.tar+gzip` archive layer. The layer title is `name-version.tgz`. Publication preserves the package bytes, including license files. Bale validates the package and runs its module directly; Helm's installer does not support this runtime.
 
-The archive is limited to 256 MiB in compressed and expanded form; the module remains limited to 128 MiB. Metadata, file counts and archive paths are also bounded and validated. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
+For existing registry artifacts, Bale also accepts an optional second provenance layer titled `name-version.tgz.prov`. It verifies the bytes without treating them as a trusted signature. An OCI index must select exactly one manifest with platform `wasm/wasip1`; the bundle retains the complete selected graph, including the index.
+
+The archive is limited to 256 MiB in both compressed and expanded form, with at most 4,096 logical entries. `plugin.yaml`, OCI metadata and optional provenance are each limited to 4 MiB; the module remains limited to 128 MiB. Archive paths are limited to 4,096 bytes. Entries must be regular files or directories under the package root: links, special files, unsafe or duplicate paths, setuid/setgid permissions and trailing archive content are rejected. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
 
 ## Runtime and cache boundaries
 
-Bale uses Wago behind an internal adapter; the [Go API](../sdk.md#run-a-dependency-plugin) and portable contract expose no engine-specific types. Wago is a prerelease dependency. Native caches are engine-private and rebuildable from Wasm.
+Bale uses Wago behind an internal adapter. The [Go API](../sdk.md#run-a-dependency-plugin) exposes no engine-specific types. Wago is a prerelease dependency; its native caches can be rebuilt from the module.
+
+Create, authorized latest pull and manual generation accept these settings:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--plugin-cache DIR` | User cache directory under `bale/plugins` | Trusted compiled-code cache; `--plugin-cache ''` disables it. |
+| `--plugin-memory BYTES` | `268435456` (256 MiB) | Guest linear-memory limit; multiple of 65,536 bytes, at most 4 GiB. |
+| `--plugin-timeout DURATION` | `30s` | Guest execution timeout, excluding compilation. |
 
 Helm's [`extism/v1` runtime](https://github.com/helm/helm/blob/v4.3.0/internal/plugin/runtime_extismv1.go) uses a different entry point and host APIs. Bale's discovery modules are not interchangeable with Helm Extism plugins. The native Bale Helm consumer uses Helm's `postrenderer/v1` subprocess contract instead.
 
-Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Distribute the portable plugin package instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Insecure or corrupt cache entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
+Cached code is native executable content. Keep the cache local and trusted; do not distribute it as a plugin or include it in an OCI bundle. Distribute the portable plugin package instead. The cache directory must belong to the current user with mode `0700`; Bale creates it with that mode if absent. Cache entries must be regular files owned by the current user with mode `0600`; insecure or corrupt entries fail the run. The SDK disables persistent caching by default; callers opt in with `CacheDirectory`.
 
 Disk caching requires supported Unix ownership and no-follow file operations. On other platforms, leave `CacheDirectory` empty or pass `--plugin-cache ''`.
 
-Cache identity includes the host executable digest, source Wasm digest, platform and compiler settings. Rebuilding Bale or an SDK host produces a separate cache automatically; no runtime-version fields need to be maintained in plugin files.
+Cache identity includes the host executable digest, module digest, platform and compiler settings. Rebuilding the host creates a separate cache automatically.
 
-Runs serialize within one Bale process to limit concurrent compiler and guest memory use. Waiting for that permit is cancellable. Compilation is synchronous and cannot currently be interrupted: cancellation is checked before and after compilation, so a cold compile can delay cancellation. The execution timeout applies to the guest, not compilation.
+Runs serialize within one process. Waiting is cancellable, but compilation is synchronous: cancellation is checked before and after it. A cold compile can delay cancellation. The execution timeout applies only to the guest.
 
 Guest linear-memory limits exclude the compiler, compiled code and host allocations. Measure large modules and apply host process limits when total memory must be bounded.

@@ -2,7 +2,7 @@
 
 <div class="strio-intro" markdown>
 Bale captures OCI images and artifacts in a portable bundle.
-Carry an offline archive or store it in a registry, then push where you choose.
+Capture related content once, then carry it offline or deliver it through a registry.
 </div>
 
 [Get started](getting-started.md){ .md-button .md-button--primary }
@@ -16,20 +16,20 @@ curl -fsSL https://bale.strio.dev/install.sh | sh
 bale --version
 ```
 
-See [installation](getting-started.md) for requirements, exact versions and alternative installs.
+See [getting started](getting-started.md) for requirements, the Bale container and other installation options.
 
 <div class="strio-paths" markdown>
 <div class="strio-path" markdown>
 <p class="strio-path__title">Carry an offline bundle</p>
 
-Capture an image, inspect its contents, and restore it from an archive. Choose a destination registry when you deliver.
+Capture an image, inspect the bundle and carry it to another machine.
 
 [First-bundle tutorial](tutorials/first-bundle.md)
 </div>
 <div class="strio-path" markdown>
 <p class="strio-path__title">Move a Helm application</p>
 
-Discover a chart's images, transfer them together, and deploy using their destination locations.
+Carry a chart and its images together, then deploy from the receiving registry.
 
 [Helm guide](helm.md)
 </div>
@@ -51,18 +51,11 @@ bale create --layout -f bale.yaml ./release
 bale save ./release -o release.tar
 ```
 
-On the receiving side, restore the archive and push to your registry:
-
-```sh
-bale load -i release.tar ./restored
-bale push ./restored mirror.example.com/releases/v1:bundle
-```
-
-Replace `mirror.example.com` with a registry you can write to. [Follow the tutorial](tutorials/first-bundle.md) for inspection and a delivery preview before publication.
+The archive contains everything captured by the bundle. [Follow the tutorial](tutorials/first-bundle.md) to restore it, choose delivery paths and push to a receiving registry.
 
 ## Keep related content together
 
-- **Preserve original content.** Capture complete multiarchitecture images, OCI artifacts, nested bundles and selected referrers. [How bundles work](concepts/bundles.md).
-- **Include dependencies.** Follow attached declarations or run an OCI discovery plugin selected in your recipe. [Recipes](recipes.md) · [Dependency declarations](dependencies.md).
-- **Deploy delivered charts.** Read destination records through the [Helm integration](helm.md#use-delivered-images-in-helm) or [Flux Operator adapter](flux.md).
-- **Build your own integration.** Use caller-owned stores, dependency declarations and transfer plans through the [Go SDK](sdk.md).
+- **Carry complete artifacts.** Keep image platforms and related OCI content together. [How bundles work](concepts/bundles.md).
+- **Include dependencies.** Capture the images and artifacts an application needs. [Recipes](recipes.md).
+- **Deploy from your registry.** Use delivered image locations with [Helm](helm.md) or [Flux](flux.md).
+- **Integrate with other tools.** Use Bale as a library through the [Go SDK](sdk.md).

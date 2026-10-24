@@ -1,6 +1,6 @@
-# Delivery updates
+# Update delivery paths
 
-Carry edited publication paths onto a refreshed bundle. Keep both snapshots: the old delivery YAML names captured artifacts, but only the old bundle records which selectors chose them.
+Carry your path edits onto a refreshed bundle. Keep both snapshots: the old bundle records which source selectors chose each artifact.
 
 ## Update a file
 
@@ -13,7 +13,7 @@ bale push ./refreshed mirror.example.com/releases/v1:bundle \
   --delivery refreshed.delivery.yaml --dry-run
 ```
 
-Registry references work too:
+You can also use registry references:
 
 ```sh
 bale delivery update registry.example.com/bundles/release:v1 \
@@ -21,36 +21,29 @@ bale delivery update registry.example.com/bundles/release:v1 \
   -f old.delivery.yaml -o new.delivery.yaml
 ```
 
-`--file/-f` selects YAML bound to the old bundle; `--output/-o` requires a new file. Both inputs are registry references unless `--layout` is set.
+`--file/-f` selects the old delivery YAML; `--output/-o` requires a new file. Use `--layout` for local inputs.
 
 ## Matching paths
 
-The new [delivery file](transfers.md#export-delivery-paths) contains every refreshed artifact and binds to the new digest:
+The new file binds to the refreshed bundle and lists every artifact:
 
-- An exact repository/digest match retains its explicit path.
-- An input, dependency or plugin selector can carry a path to a changed digest when both resolution sets contain one artifact.
-- Repeated aliases deduplicate; several old artifacts can converge when their paths agree.
-- Unclaimed artifacts receive defaults, and removed artifacts are reported.
+- Exact repository/digest matches retain their paths.
+- Unambiguous input, dependency and plugin selectors can carry paths to changed digests.
+- New or unmatched artifacts receive defaults; removed artifacts are reported.
 
-Every old row is an explicit claim, even if its path equals the default. Omitted rows make no claim. `push --map` settings are not carried forward; omit a new row if that artifact should use repository-wide mapping instead.
-
-Nested inventories participate in matching. Selector evidence is aggregated by role and full reference, never by input position; differing nested captures can make a selector ambiguous. Changed platform children, declarations and arbitrary referrers without selector evidence receive defaults rather than guessed paths.
+Nested inventories participate too. Every old row is an explicit path choice. `push --map` settings are separate and are not carried forward. See [matching rules](reference/transfers.md#matching-delivery-paths) for aliases and ambiguous selectors.
 
 ## Resolve conflicts
 
-Bale writes no file if paths split across targets, differing paths converge, or selectors have multiple possible resolutions. An exact artifact that survives while its tag moves elsewhere can also have competing claims.
-
-The report shows the disputed assignments and selector evidence. Copy the old delivery file, remove disputed rows from the copy, then rerun the update. Edit the resulting defaults and review them with `push --dry-run`.
+If old path choices disagree or a selector matches several artifacts, Bale reports conflicts and writes no file. Copy the old YAML, remove disputed rows from the copy, then rerun the update. Edit the resulting defaults and review them with `push --dry-run`.
 
 ## Reports and validation
 
-The readable report labels paths `preserved`, `moved`, `defaulted` or `removed`. For automation:
+The readable report labels paths `preserved`, `moved`, `defaulted` or `removed`. Request JSON for automation:
 
 ```sh
 bale delivery update --layout ./locked ./refreshed \
   -f bale.delivery.yaml -o refreshed.report.delivery.yaml --format json
 ```
 
-JSON includes `before`, `after`, `changes`, `conflicts` and, on success, a candidate `delivery`. Conflicts return a report with status 125 and no output file; invalid inputs or read/template failures return 125 without a report.
-
-Update reads manifests and interpreted metadata, including nested bundles and selected declarations. It does not refresh selectors, run plugins or check opaque payloads. Registry references resolve once; local updates stay offline and leave both layouts unchanged. [Push preview](transfers.md#push-to-a-destination) validates the full local graph before publication.
+Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate the full graph. [Report fields and exit status](reference/transfers.md#update-reports) are listed in the reference.

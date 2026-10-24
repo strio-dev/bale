@@ -1,27 +1,19 @@
 # Getting started
 
-Install Bale on Linux AMD64 or ARM64, then capture your first bundle. Bale needs registry access to read artifacts; it does not need a container runtime.
+Bale runs on Linux AMD64 and ARM64. Capturing artifacts needs registry access; a container runtime is not required.
 
-## Install a release
-
-Install the latest stable Linux binary:
+## Install
 
 ```sh
 curl -fsSL https://bale.strio.dev/install.sh | sh
 bale --version
 ```
 
-The installer verifies checksums and installs under `/usr/local`, using `sudo` when needed. To choose a writable prefix:
-
-```sh
-curl -fsSL https://bale.strio.dev/install.sh | BALE_INSTALL_PREFIX="$HOME/.local" sh
-```
-
-Add `$HOME/.local/bin` to `PATH` if needed. To select a version, append `-s -- TAG` to `sh`, replacing `TAG` with an exact tag from [GitHub releases](https://github.com/strio-dev/bale/releases).
+This installs the latest stable release. For a specific version or Nix, see [other installation options](#other-installation-options).
 
 ## Run in a container
 
-The Bale image includes the CLI and CA certificates for Linux AMD64 and ARM64:
+Use the published Bale image with Podman or Docker:
 
 [Run Bale in a container](guides/container.md){ .md-button .strio-container-link }
 
@@ -31,9 +23,27 @@ The Bale image includes the CLI and CA certificates for Linux AMD64 and ARM64:
 <span>Bundle BusyBox, inspect its contents, and restore it from an offline archive.</span>
 <span class="strio-tutorial__action">Start tutorial</span>](tutorials/first-bundle.md){ .strio-path .strio-tutorial }
 
-Read [how bundles work](concepts/bundles.md) for the recipe, captured snapshot and delivery file, or [transfers](transfers.md) to use a registry as the bundle store.
+See [how bundles work](concepts/bundles.md) for the capture and delivery lifecycle, or [transfer artifacts](transfers.md) to store a bundle in a registry.
 
-## Install with Nix
+## Other installation options
+
+### Install a specific version
+
+Pass a published tag from [GitHub releases](https://github.com/strio-dev/bale/releases), replacing `VERSION` below:
+
+```sh
+curl -fsSL https://bale.strio.dev/install.sh | sh -s -- VERSION
+```
+
+The installer verifies checksums and installs under `/usr/local`, using `sudo` when needed. To use a writable directory instead:
+
+```sh
+curl -fsSL https://bale.strio.dev/install.sh | BALE_INSTALL_PREFIX="$HOME/.local" sh
+```
+
+Add `$HOME/.local/bin` to `PATH` if needed.
+
+### Install with Nix
 
 With Nix flakes enabled:
 
@@ -42,16 +52,4 @@ nix profile add github:strio-dev/bale
 bale --version
 ```
 
-This builds the repository's default branch.
-
-## Build from source
-
-From a checkout:
-
-```sh
-nix develop path:.
-just build
-./result-bale/bin/bale --version
-```
-
-Inside the development shell, `bale` runs the current source. See [contributing](contributing.md) for direnv and development checks.
+This builds the repository's default branch. See [contributing](contributing.md) for source builds and development setup.

@@ -4,7 +4,7 @@ Implement a WASI Preview 1 command to produce a Bale [dependency declaration](..
 
 ## Module contract
 
-The guest exports the standard WASI command entry point, `_start`. It receives one plugin-defined UTF-8 JSON request on stdin. Its only argument is `bale-plugin`; Bale does not pass host environment variables, mount host filesystems, or provide network access. Supply values and application inputs using a schema defined by that plugin. Recipe blob bindings can supply archive bytes from the selected artifact.
+The guest exports the standard WASI command entry point, `_start`. It receives one plugin-defined UTF-8 JSON request on stdin. Its only argument is `bale-plugin`; Bale does not pass host environment variables, mount host filesystems, or provide network access. Supply values and application inputs using the plugin’s schema. Recipe inputs preserve JSON types; blob bindings can supply archive bytes from the selected artifact. Captures retain literal inputs and binding definitions, not the injected archive bytes.
 
 On success, stdout must contain one UTF-8 JSON dependency declaration with `schemaVersion: 1`:
 
@@ -108,13 +108,21 @@ nix develop --no-update-lock-file path:.#release --command \
 bale plugins push -f references-1.0.0.tgz registry.example.com/plugins/references:1
 ```
 
-This follows Helm's archive-inside-OCI distribution pattern. The metadata identifies Bale's dependency protocol and WASI runtime; it is not a Helm-installable plugin. Bale validates the package and runs its module directly, without executing host commands from metadata. License files stay inside the same archive layer.
+The package uses Helm's archive-inside-OCI pattern with Bale's execution metadata. Its OCI artifact type is `application/vnd.bale.plugin.v1+json`, with an empty config and one gzip archive layer. Publication preserves the package bytes, including license files; bundles retain the selected graph, including an index when present. Bale validates the package and runs its module directly. Helm's installer does not support this runtime.
 
 The archive is limited to 256 MiB in compressed and expanded form; the module remains limited to 128 MiB. Metadata, file counts and archive paths are also bounded and validated. For the built-in Helm discovery package, `just helm-plugin-package` uses the reproducible Nix build.
 
 ## Runtime and cache boundaries
 
-Bale uses Wago behind an internal adapter; the [Go API](../sdk.md#run-a-dependency-plugin) and portable contract expose no engine-specific types. Wago is a prerelease dependency. Native caches are engine-private and rebuildable from Wasm.
+Bale uses Wago behind an internal adapter. The [Go API](../sdk.md#run-a-dependency-plugin) exposes no engine-specific types. Wago is a prerelease dependency; its native caches can be rebuilt from the module.
+
+Create, authorized latest pull and manual generation accept these settings:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--plugin-cache DIR` | User cache directory under `bale/plugins` | Trusted compiled-code cache; `--plugin-cache ''` disables it. |
+| `--plugin-memory BYTES` | `268435456` (256 MiB) | Guest linear-memory limit; multiple of 65,536 bytes, at most 4 GiB. |
+| `--plugin-timeout DURATION` | `30s` | Guest execution timeout, excluding compilation. |
 
 Helm's [`extism/v1` runtime](https://github.com/helm/helm/blob/v4.3.0/internal/plugin/runtime_extismv1.go) uses a different entry point and host APIs. Bale's discovery modules are not interchangeable with Helm Extism plugins. The native Bale Helm consumer uses Helm's `postrenderer/v1` subprocess contract instead.
 
@@ -122,8 +130,8 @@ Cached code is native executable content. Keep the cache local and trusted; do n
 
 Disk caching requires supported Unix ownership and no-follow file operations. On other platforms, leave `CacheDirectory` empty or pass `--plugin-cache ''`.
 
-Cache identity includes the host executable digest, source Wasm digest, platform and compiler settings. Rebuilding Bale or an SDK host produces a separate cache automatically; no runtime-version fields need to be maintained in plugin files.
+Cache identity includes the host executable digest, module digest, platform and compiler settings. Rebuilding the host creates a separate cache automatically.
 
-Runs serialize within one Bale process to limit concurrent compiler and guest memory use. Waiting for that permit is cancellable. Compilation is synchronous and cannot currently be interrupted: cancellation is checked before and after compilation, so a cold compile can delay cancellation. The execution timeout applies to the guest, not compilation.
+Runs serialize within one process. Waiting is cancellable, but compilation is synchronous: cancellation is checked before and after it. A cold compile can delay cancellation. The execution timeout applies only to the guest.
 
 Guest linear-memory limits exclude the compiler, compiled code and host allocations. Measure large modules and apply host process limits when total memory must be bounded.

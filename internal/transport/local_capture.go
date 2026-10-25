@@ -218,10 +218,20 @@ func copyCaptureObject(ctx context.Context, src content.Fetcher, dst content.Sto
 	}
 	defer func() { retErr = errors.Join(retErr, rc.Close()) }()
 	verified := content.NewVerifyReader(rc, d)
-	if err := dst.Push(ctx, d, verified); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
-		return err
+	if err := dst.Push(ctx, d, verified); err != nil {
+		if !errors.Is(err, errdef.ErrAlreadyExists) {
+			return err
+		}
+		// A concurrent writer can publish the object before Push consumes any
+		// source bytes. Finish reading before verifying the source descriptor.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := io.Copy(io.Discard, verified); err != nil {
+			return err
+		}
 	}
-	return verified.Verify()
+	return errors.Join(verified.Verify(), ctx.Err())
 }
 
 func readLocalCapture(ctx context.Context, path string, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {

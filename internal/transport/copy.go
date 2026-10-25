@@ -135,13 +135,29 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 		}
 		defer func() { retErr = errors.Join(retErr, rc.Close()) }()
 		verified := content.NewVerifyReader(rc, d)
-		if err := destination.Push(ctx, d, verified); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+		pushErr := destination.Push(ctx, d, verified)
+		alreadyExists := errors.Is(pushErr, errdef.ErrAlreadyExists)
+		if pushErr != nil {
+			if !alreadyExists {
+				return pushErr
+			}
+			// Push may skip its reader when another writer won the same CAS
+			// insertion. Consume the remaining source before verifying it.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if _, err := io.Copy(io.Discard, verified); err != nil {
+				return err
+			}
+		}
+		if err := errors.Join(verified.Verify(), ctx.Err()); err != nil {
 			return err
 		}
-		if err := verified.Verify(); err != nil {
-			return err
+		if alreadyExists {
+			stats.ObjectsSkipped++
+		} else {
+			stats.BlobBytesUploaded += d.Size
 		}
-		stats.BlobBytesUploaded += d.Size
 		return nil
 	}
 	if err := walk(root, true); err != nil {

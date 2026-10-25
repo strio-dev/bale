@@ -533,12 +533,7 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 		// Planning is entirely local and must not depend on ambient credentials.
 		service, err = bale.NewClient(bale.ClientOptions{})
 	} else {
-		clientOpts := opts
-		if command == "create" || command == "pull" {
-			// Explicit local outputs still read authenticated registry sources.
-			clientOpts.layout = false
-		}
-		service, err = newCLIClient(clientOpts, progress)
+		service, err = newCLIClient(opts, progress)
 	}
 	if err != nil {
 		return fail(errOut, err)
@@ -620,9 +615,9 @@ func runContext(ctx context.Context, args []string, out, errOut io.Writer) int {
 func newCLIClient(opts commandOptions, progress func(bale.Progress)) (*bale.Client, error) {
 	options := bale.ClientOptions{PlainHTTPRegistries: opts.plainHTTP, OnProgress: progress}
 	options.PluginRunner = configuredPluginRunner(opts)
-	if !opts.layout {
-		options.Credentials = lazyDockerCredentials(opts.authFile)
-	}
+	// Credential discovery is lazy: local reads stay offline, while operations
+	// with local inputs can still authenticate their registry destinations.
+	options.Credentials = lazyDockerCredentials(opts.authFile)
 	return bale.NewClient(options)
 }
 

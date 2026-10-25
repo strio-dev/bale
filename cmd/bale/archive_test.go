@@ -103,6 +103,21 @@ func TestLocalCreateUsesAuthenticatedSources(t *testing.T) {
 	if mutations.Load() != 0 || authorized.Load() == 0 {
 		t.Fatalf("local capture source policy: mutations=%d authorized=%d", mutations.Load(), authorized.Load())
 	}
+	// Explicit auth selection and a stdin recipe also work through the actual
+	// authenticated registry path, independently of Docker's ambient config.
+	authFile := filepath.Join(credentials, "auth.json")
+	if err := os.WriteFile(authFile, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(credentials, "config.json"), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	withInput(t, data)
+	out.Reset()
+	errs.Reset()
+	if code := run([]string{"create", "--store", t.TempDir(), "-f", "-", "--authfile", authFile, "--quiet", "--plain-http", host}, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("authenticated stdin create: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
 }
 
 func TestArchiveCLIIsLocal(t *testing.T) {

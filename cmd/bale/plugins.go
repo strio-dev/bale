@@ -39,6 +39,7 @@ Options:
       --format FORMAT     Output JSON or a Go template (default: plugin digest)
   -q, --quiet             Suppress progress output
       --plain-http HOST   Permit HTTP for this exact registry host (repeatable)
+      --authfile FILE     Registry authentication file
   -h, --help              Help for plugins push
 
 Examples:

@@ -75,7 +75,7 @@ Or generate and attach in one command:
 bale dependencies attach registry.example.com/charts/web:1.4 --plugin registry.example.com/plugins/references:1 --input request.json
 ```
 
-References resolve during bundle creation. For local development, use `--plugin-file references.wasm` instead of `--plugin`; both require `--input`.
+References resolve during bundle creation. Use `--input -` to read the request JSON from stdin (at most 8 MiB), or pipe generated YAML into `dependencies attach SUBJECT -f -`. For local development, use `--plugin-file references.wasm` instead of `--plugin`; both require `--input`.
 
 ## Runtime and cache boundaries
 

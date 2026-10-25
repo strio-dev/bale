@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"text/tabwriter"
 
 	"github.com/strio-dev/bale"
 	"github.com/strio-dev/bale/store"
@@ -29,7 +27,7 @@ func managedCommand(command string, opts commandOptions) bool {
 func openManaged(ctx context.Context, opts commandOptions, progress func(bale.Progress)) (*store.Store, error) {
 	client, err := bale.NewClient(bale.ClientOptions{
 		PlainHTTPRegistries: opts.plainHTTP,
-		Credentials:         lazyDockerCredentials(),
+		Credentials:         lazyDockerCredentials(opts.authFile),
 		OnProgress:          progress,
 		PluginRunner:        configuredPluginRunner(opts),
 	})
@@ -53,9 +51,9 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 	case "tag":
 		valid = len(opts.args) >= 2
 	case "save":
-		valid = len(opts.args) == 1 && opts.archiveOutput != ""
+		valid = len(opts.args) == 1
 	case "load":
-		valid = len(opts.args) == 0 && opts.archiveInput != ""
+		valid = len(opts.args) == 0
 	case "ls", "info", "prune":
 		valid = len(opts.args) == 0
 	}
@@ -78,8 +76,8 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 			return fail(errOut, err)
 		}
 	}
-	if command == "inspect" && opts.outputDelivery != "" && (len(opts.args) != 1 || opts.formatSet) {
-		return fail(errOut, fmt.Errorf("--output-delivery requires one bundle and cannot be combined with --format"))
+	if err := validateArchiveStream(command, opts, out); err != nil {
+		return fail(errOut, err)
 	}
 	formatter, err := newOutputFormatter(opts.format, command == "inspect")
 	if err != nil {
@@ -91,7 +89,7 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 	}
 	var recipe bale.Recipe
 	if command == "create" {
-		raw, err := os.ReadFile(opts.file)
+		raw, err := readInputFile(opts.file)
 		if err != nil {
 			return fail(errOut, err)
 		}
@@ -102,7 +100,7 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 	}
 	var delivery *bale.DeliveryFile
 	if opts.delivery != "" {
-		raw, err := os.ReadFile(opts.delivery)
+		raw, err := readInputFile(opts.delivery)
 		if err != nil {
 			return fail(errOut, err)
 		}
@@ -163,22 +161,24 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 			result, resultDigest, err = pushed, pushed.Descriptor.Digest.String(), pushErr
 		}
 	case "save":
-		saved, saveErr := local.Save(ctx, opts.args[0], opts.archiveOutput)
+		var saved bale.ArchiveResult
+		var saveErr error
+		if archiveStream(opts.archiveOutput) {
+			saved, saveErr = local.SaveTo(ctx, opts.args[0], out)
+		} else {
+			saved, saveErr = local.Save(ctx, opts.args[0], opts.archiveOutput)
+		}
 		result, resultDigest, err = saved, saved.Descriptor.Digest.String(), saveErr
 	case "load":
-		loaded, loadErr := local.Load(ctx, opts.archiveInput, opts.tags)
+		var loaded bale.ArchiveResult
+		var loadErr error
+		if archiveStream(opts.archiveInput) {
+			loaded, loadErr = local.LoadFrom(ctx, os.Stdin, opts.tags)
+		} else {
+			loaded, loadErr = local.Load(ctx, opts.archiveInput, opts.tags)
+		}
 		result, resultDigest, err = loaded, loaded.Descriptor.Digest.String(), loadErr
 	case "inspect":
-		if deliveryOutput != nil {
-			file, exportErr := local.ExportDelivery(ctx, opts.args[0])
-			if exportErr == nil {
-				exportErr = deliveryOutput.write(file)
-			}
-			if exportErr != nil {
-				return fail(errOut, exportErr)
-			}
-			return 0
-		}
 		results := make([]bale.InspectResult, 0, len(opts.args))
 		var failures []error
 		for _, ref := range opts.args {
@@ -224,24 +224,7 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 					}
 				}
 			} else {
-				table := tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0)
-				if _, err := fmt.Fprintln(table, "NAMES\tDIGEST\tCONTENT"); err != nil {
-					return fail(errOut, err)
-				}
-				for _, entry := range entries {
-					kind := "complete"
-					if entry.MetadataOnly {
-						kind = "metadata"
-					}
-					names := strings.Join(entry.Names, ", ")
-					if names == "" {
-						names = "<none>"
-					}
-					if _, err := fmt.Fprintf(table, "%s\t%s\t%s\n", names, entry.Descriptor.Digest, kind); err != nil {
-						return fail(errOut, err)
-					}
-				}
-				if err = table.Flush(); err != nil {
+				if err = writeBundleList(&buf, entries, opts.quiet, opts.noTrunc); err != nil {
 					return fail(errOut, err)
 				}
 			}
@@ -282,6 +265,9 @@ func runManaged(ctx context.Context, command string, opts commandOptions, out, e
 		return fail(errOut, errors.Join(err, progressErr, outputErr))
 	}
 	if command == "ls" || command == "tag" || command == "rm" || command == "prune" || command == "info" {
+		return 0
+	}
+	if command == "save" && archiveStream(opts.archiveOutput) {
 		return 0
 	}
 	if command == "create" && opts.dryRun && !opts.formatSet {

@@ -29,12 +29,27 @@ type ArchiveResult struct {
 // Save writes the required bundle closure as a deterministic, uncompressed OCI
 // layout tar. Unrelated files in the input layout are never archived.
 func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (result ArchiveResult, retErr error) {
+	return s.saveArchive(ctx, layoutPath, archivePath, nil)
+}
+
+// SaveTo writes the same verified OCI tar as Save directly to out. The caller
+// owns the writer; a write failure may leave a partial archive in that stream.
+func (s *Service) SaveTo(ctx context.Context, layoutPath string, out io.Writer) (ArchiveResult, error) {
+	if out == nil {
+		return ArchiveResult{}, operationError("save", layoutPath, v1.Descriptor{}, nil, fmt.Errorf("%w: archive writer is required", ErrInvalid))
+	}
+	return s.saveArchive(ctx, layoutPath, "", out)
+}
+
+func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath string, out io.Writer) (result ArchiveResult, retErr error) {
 	defer func() { retErr = operationError("save", layoutPath, result.Descriptor, nil, retErr) }()
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if err := checkArchiveDestination(archivePath); err != nil {
-		return result, err
+	if out == nil {
+		if err := checkArchiveDestination(archivePath); err != nil {
+			return result, err
+		}
 	}
 	store, snapshot, capture, _, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
@@ -44,9 +59,12 @@ func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (res
 		store = captureSource{local: store, service: s, sources: capture.Sources}
 	}
 	result.Descriptor = snapshot.Descriptor
-	parent := filepath.Dir(filepath.Clean(archivePath))
-	if err := os.MkdirAll(parent, 0755); err != nil {
-		return result, err
+	var parent string
+	if out == nil {
+		parent = filepath.Dir(filepath.Clean(archivePath))
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return result, err
+		}
 	}
 	stage, err := os.MkdirTemp(parent, ".bale-save-")
 	if err != nil {
@@ -56,6 +74,13 @@ func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (res
 	normalized := filepath.Join(stage, "layout")
 	if err := writeLayout(ctx, store, snapshot.Descriptor, normalized, &Stats{}); err != nil {
 		return result, err
+	}
+	if out != nil {
+		if err := writeLayoutTar(ctx, out, normalized); err != nil {
+			return result, err
+		}
+		result.LayoutPath = layoutPath
+		return result, ctx.Err()
 	}
 	fp, err := os.OpenFile(filepath.Join(stage, "archive.tar"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
@@ -86,6 +111,19 @@ func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (res
 // The archive is staged privately: ORAS may reopen its path while walking the
 // graph, and must not observe changes made to the caller's archive meanwhile.
 func (s *Service) Load(ctx context.Context, archivePath, layoutPath string) (result ArchiveResult, retErr error) {
+	return s.loadArchive(ctx, archivePath, layoutPath, nil)
+}
+
+// LoadFrom stages the input once for ORAS random access, verifies the complete
+// archive, and only then publishes a local layout. The caller owns the reader.
+func (s *Service) LoadFrom(ctx context.Context, in io.Reader, layoutPath string) (ArchiveResult, error) {
+	if in == nil {
+		return ArchiveResult{}, operationError("load", "", v1.Descriptor{}, nil, fmt.Errorf("%w: archive reader is required", ErrInvalid))
+	}
+	return s.loadArchive(ctx, "", layoutPath, in)
+}
+
+func (s *Service) loadArchive(ctx context.Context, archivePath, layoutPath string, in io.Reader) (result ArchiveResult, retErr error) {
 	defer func() { retErr = operationError("load", archivePath, result.Descriptor, nil, retErr) }()
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -99,7 +137,12 @@ func (s *Service) Load(ctx context.Context, archivePath, layoutPath string) (res
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(stage)) }()
 	staged := filepath.Join(stage, "archive.tar")
-	if err := stageArchive(ctx, archivePath, staged); err != nil {
+	if in == nil {
+		err = stageArchive(ctx, archivePath, staged)
+	} else {
+		err = stageArchiveReader(ctx, in, staged)
+	}
+	if err != nil {
 		return result, err
 	}
 	root, err := scanLayoutTar(ctx, staged)
@@ -154,6 +197,10 @@ func stageArchive(ctx context.Context, source, target string) (retErr error) {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%w: archive must be a regular file", ErrInvalid)
 	}
+	return stageArchiveReader(ctx, in, target)
+}
+
+func stageArchiveReader(ctx context.Context, in io.Reader, target string) (retErr error) {
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err

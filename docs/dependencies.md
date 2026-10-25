@@ -41,7 +41,7 @@ Use registry coordinates you control and have permission to write. Attach pins t
 | `list` | Verified declaration descriptors, without parsing payloads. Use `.Digest` to choose a declaration in a recipe. |
 | `inspect` | Validated declarations with `repository`, `subject`, `descriptor` and `declaration`, sorted by digest. It does not select or follow dependencies. |
 
-List and inspect default to JSON arrays (`[]` when empty). For authentication, HTTP scopes and output templates, see [CLI conventions](reference/cli.md).
+List and inspect default to JSON arrays (`[]` when empty); `ls` aliases `list`. Attach accepts `-f -` to read a declaration from stdin. For authentication, HTTP scopes and output templates, see [CLI conventions](reference/cli.md).
 
 ## Generate with a plugin
 

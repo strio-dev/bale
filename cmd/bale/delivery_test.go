@@ -20,7 +20,7 @@ func TestDeliveryExportLocal(t *testing.T) {
 	before := layoutBytes(t, dir)
 	output := filepath.Join(t.TempDir(), "delivery.yaml")
 	var out, errs bytes.Buffer
-	if code := run([]string{"inspect", "--layout", dir, "--output-delivery", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
+	if code := run([]string{"delivery", "export", "--layout", dir, "-o", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
 		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	raw, err := os.ReadFile(output)
@@ -38,6 +38,60 @@ func TestDeliveryExportLocal(t *testing.T) {
 	for path, data := range before {
 		if data != after[path] {
 			t.Fatalf("layout changed: %s", path)
+		}
+	}
+}
+
+func TestDeliveryExportStdout(t *testing.T) {
+	dir, root, _ := cliBundle(t)
+	for _, flags := range [][]string{nil, {"-o", "-"}} {
+		var out, errs bytes.Buffer
+		args := append([]string{"delivery", "export", "--layout", dir}, flags...)
+		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+			t.Fatalf("stdout export: exit %d stderr %s", code, &errs)
+		}
+		if file, err := bale.DecodeDeliveryFile(out.Bytes()); err != nil || file.Bundle != root.Digest {
+			t.Fatalf("stdout YAML: %s: %v", &out, err)
+		}
+	}
+	var errs bytes.Buffer
+	if code := run([]string{"delivery", "export", "--layout", dir}, brokenWriter{}, &errs); code != 125 || !strings.Contains(errs.String(), "write failed") {
+		t.Fatalf("stdout failure: exit %d stderr %s", code, &errs)
+	}
+}
+
+func TestDeliveryExportManaged(t *testing.T) {
+	layout, root, _ := cliBundle(t)
+	dir := t.TempDir()
+	archive, local := filepath.Join(dir, "bundle.tar"), filepath.Join(dir, "store")
+	for _, args := range [][]string{
+		{"save", "--layout", layout, "-o", archive},
+		{"load", "--store", local, "-i", archive, "-t", "release:v1"},
+	} {
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+			t.Fatalf("prepare managed bundle: %v: exit %d stderr %s", args, code, &errs)
+		}
+	}
+	docker := t.TempDir()
+	if err := os.WriteFile(filepath.Join(docker, "config.json"), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCKER_CONFIG", docker)
+	var out, errs bytes.Buffer
+	if code := run([]string{"delivery", "export", "release:v1", "--store", local}, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("managed export: exit %d stderr %s", code, &errs)
+	}
+	if file, err := bale.DecodeDeliveryFile(out.Bytes()); err != nil || file.Bundle != root.Digest {
+		t.Fatalf("managed YAML: %s: %v", &out, err)
+	}
+}
+
+func TestDeliveryExportHelp(t *testing.T) {
+	for _, args := range [][]string{{"delivery", "export", "--help"}, {"help", "delivery", "export"}} {
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 || !strings.Contains(out.String(), "bale delivery export [options] BUNDLE") {
+			t.Fatalf("help: exit %d stdout %s stderr %s", code, &out, &errs)
 		}
 	}
 }
@@ -87,15 +141,15 @@ func TestDeliveryCLIValidationBeforeStorage(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"inspect", "--layout", "missing", "--output-delivery="}, "nonempty path"},
+		{[]string{"delivery", "export", "--layout", "missing", "--output="}, "nonempty path"},
 		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery="}, "nonempty path"},
-		{[]string{"inspect", "--layout", "missing", "other", "--output-delivery", "ignored.yaml"}, "requires one bundle"},
-		{[]string{"inspect", "--layout", "missing", "--output-delivery", "ignored.yaml", "--format", "json"}, "cannot be combined"},
+		{[]string{"delivery", "export", "--layout", "missing", "other", "-o", "ignored.yaml"}, "requires one bundle"},
+		{[]string{"delivery", "export", "--layout", "missing", "-o", "ignored.yaml", "--format", "json"}, "unknown option"},
 		{[]string{"create", "--registry", "-f", existing, "unreachable.invalid/b:tag", "--output-delivery", existing}, "already exists"},
-		{[]string{"inspect", "--layout", "missing", "--output-delivery", existing}, "already exists"},
+		{[]string{"delivery", "export", "--layout", "missing", "-o", existing}, "already exists"},
 		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery", malformed}, "unknown"},
 		{[]string{"push", "--layout", "missing", "unreachable.invalid/b:tag", "--delivery", "missing-delivery-file"}, "no such file"},
-		{[]string{"inspect", "--layout", "missing", "--output-delivery", filepath.Join(t.TempDir(), "absent", "file.yaml")}, "no such file"},
+		{[]string{"delivery", "export", "--layout", "missing", "-o", filepath.Join(t.TempDir(), "absent", "file.yaml")}, "no such file"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(tc.args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), tc.want) {
@@ -107,7 +161,7 @@ func TestDeliveryCLIValidationBeforeStorage(t *testing.T) {
 func TestDeliveryExportFailureRemovesTemporaryFile(t *testing.T) {
 	outputDir := t.TempDir()
 	var out, errs bytes.Buffer
-	if code := run([]string{"inspect", "--layout", "missing-layout", "--output-delivery", filepath.Join(outputDir, "delivery.yaml")}, &out, &errs); code != 125 {
+	if code := run([]string{"delivery", "export", "--layout", "missing-layout", "-o", filepath.Join(outputDir, "delivery.yaml")}, &out, &errs); code != 125 {
 		t.Fatalf("exit %d stderr %s", code, &errs)
 	}
 	entries, err := os.ReadDir(outputDir)

@@ -23,6 +23,8 @@ bale save release:v1 -o release.tar
 
 Save downloads missing content from the pinned sources into the shared store, validates the complete graph and writes an uncompressed OCI-layout tar archive. Keep source access and credentials available until it finishes. Shared content is stored once by digest; the bundle digest stays unchanged. Use a new archive path.
 
+Save defaults to stdout, so `bale save release:v1 > release.tar` also works. Load defaults to stdin: `bale load -t restored:v1 < release.tar`. Use `-o -` or `-i -` to select those streams explicitly.
+
 Carry both `release.tar` and your edited delivery file. Keeping placement separate lets you change it without rebuilding the archive.
 
 ## Restore and deliver

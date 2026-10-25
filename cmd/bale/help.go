@@ -6,7 +6,7 @@ func commandHelp(command string) string {
 	case "create":
 		usage = "bale create [options]"
 		description = "Resolve a recipe into the managed local store without downloading image payloads.\nNames are local aliases; creation without --tag retains the bundle by digest.\nUse --layout PATH for an explicit complete OCI directory, or --registry REF to store remotely."
-		options = `  -f, --file FILE         Recipe file (required)
+		options = `  -f, --file FILE         Recipe file (required; '-' reads stdin)
   -t, --tag NAME         Local name for the captured bundle (repeatable)
       --layout            Use a positional output directory and download complete content
       --registry          Capture and publish to the given registry reference
@@ -20,19 +20,18 @@ func commandHelp(command string) string {
 	case "save":
 		usage = "bale save [options] BUNDLE"
 		description = "Save a stored name or ID as a verified offline OCI tar archive.\nMissing pinned payloads are downloaded into the shared local store first.\nUse --layout to read an explicit OCI directory instead."
-		options = "  -o, --output FILE       New OCI tar archive (required)\n      --layout            Read an explicit OCI directory"
+		options = "  -o, --output FILE       New OCI tar archive (default: stdout; '-' for stdout)\n      --layout            Read an explicit OCI directory"
 		example = "bale save release:v1 -o release.tar"
 	case "load":
 		usage = "bale load [options]"
 		description = "Import a verified OCI bundle archive into the managed local store.\nUse --tag for local names, or --layout PATH for an explicit directory.\nLoading uses no registry access or plugin execution."
-		options = "  -i, --input FILE        OCI tar archive (required)\n  -t, --tag NAME         Local name for the imported bundle (repeatable)\n      --layout            Restore into a positional new OCI directory"
+		options = "  -i, --input FILE        OCI tar archive (default: stdin; '-' for stdin)\n  -t, --tag NAME         Local name for the imported bundle (repeatable)\n      --layout            Restore into a positional new OCI directory"
 		example = "bale load -i release.tar -t restored:v1"
 	case "inspect":
 		usage = "bale inspect [options] BUNDLE..."
 		description = "Inspect a stored bundle by local name or immutable ID.\nMetadata captures are inspected without source access; complete bundles also verify payloads.\nUse --registry for remote references, or --layout for explicit OCI directories."
 		options = `      --registry          Inspect registry references instead of stored bundles
       --layout            Inspect explicit local OCI layout directories
-      --output-delivery FILE  Export delivery YAML for one bundle instead of a report
   -f, --format FORMAT     Output JSON or a Go template (default: json)`
 		example = "bale inspect release:v1\n  bale inspect --registry registry.example.com/bundles/release:v1"
 	case "diff":
@@ -55,6 +54,7 @@ func commandHelp(command string) string {
 	case "ls":
 		usage = "bale ls [options]"
 		description = "List retained local bundles, including unnamed IDs and content availability."
+		options = "  -q, --quiet             Print bundle IDs only\n      --no-trunc          Show full bundle digests"
 		example = "bale ls\n  bale ls --format json"
 	case "tag":
 		usage = "bale tag [options] BUNDLE NAME..."
@@ -83,6 +83,8 @@ func commandHelp(command string) string {
 			defaultOutput += "; dry-run: inventory"
 		case "push":
 			defaultOutput += "; dry-run: delivery preview"
+		case "save":
+			defaultOutput = "bundle digest with --output FILE; unavailable for archive stdout"
 		case "ls":
 			defaultOutput = "readable list"
 		case "info":
@@ -92,13 +94,16 @@ func commandHelp(command string) string {
 		case "tag", "rm":
 			defaultOutput = "no output"
 		}
-		options += "\n      --format FORMAT     Output JSON or a Go template (default: " + defaultOutput + ")"
+		if command != "tag" && command != "rm" {
+			options += "\n      --format FORMAT     Output JSON or a Go template (default: " + defaultOutput + ")"
+		}
 		if command == "create" || command == "pull" || command == "push" || command == "save" || command == "load" {
 			options += "\n  -q, --quiet             Suppress progress output"
 		}
 	}
-	if command != "load" {
+	if registryCommand(command) {
 		options += "\n      --plain-http HOST   Permit HTTP for this exact registry host (repeatable)"
+		options += "\n      --authfile FILE     Registry authentication file"
 	}
 	options += "\n      --store PATH        Override the managed local store\n  -h, --help              Help for " + command
 	help := description + "\n\nUsage:\n  " + usage + "\n\nOptions:\n" + options + "\n\nExamples:\n  " + example

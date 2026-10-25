@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -133,22 +134,42 @@ func (s *Store) Materialize(ctx context.Context, reference string) (bale.PullRes
 // Save first completes the stored graph, then writes a portable verified archive.
 // Existing CAS bytes are reused, including bytes downloaded for another bundle.
 func (s *Store) Save(ctx context.Context, reference, archivePath string) (bale.ArchiveResult, error) {
+	return s.save(ctx, reference, archivePath, nil)
+}
+
+// SaveTo completes the stored graph and writes its verified OCI archive to out.
+// It leaves out open; failed writes may leave a partial archive in the stream.
+func (s *Store) SaveTo(ctx context.Context, reference string, out io.Writer) (bale.ArchiveResult, error) {
+	if out == nil {
+		return bale.ArchiveResult{}, fmt.Errorf("archive writer is required")
+	}
+	return s.save(ctx, reference, "", out)
+}
+
+func (s *Store) save(ctx context.Context, reference, archivePath string, out io.Writer) (bale.ArchiveResult, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.ArchiveResult, error) {
 		// Check the output before downloading anything. Client.Save repeats the
 		// no-replacement check when committing the finished archive.
-		if archivePath == "" {
-			return bale.ArchiveResult{}, fmt.Errorf("archive output is required")
-		}
-		if _, err := os.Lstat(archivePath); err == nil {
-			return bale.ArchiveResult{}, fmt.Errorf("archive path already exists: %s", archivePath)
-		} else if !os.IsNotExist(err) {
-			return bale.ArchiveResult{}, err
+		if out == nil {
+			if archivePath == "" {
+				return bale.ArchiveResult{}, fmt.Errorf("archive output is required")
+			}
+			if _, err := os.Lstat(archivePath); err == nil {
+				return bale.ArchiveResult{}, fmt.Errorf("archive path already exists: %s", archivePath)
+			} else if !os.IsNotExist(err) {
+				return bale.ArchiveResult{}, err
+			}
 		}
 		if _, err := s.client.MaterializeInto(ctx, bale.Root{Descriptor: record.Descriptor, Store: session.Storage()}, record.Capture, session.Storage()); err != nil {
 			return bale.ArchiveResult{}, err
 		}
 		record.MetadataOnly = false
-		result, err := viewResult(ctx, session, record, func(path string) (bale.ArchiveResult, error) { return s.client.Save(ctx, path, archivePath) })
+		result, err := viewResult(ctx, session, record, func(path string) (bale.ArchiveResult, error) {
+			if out != nil {
+				return s.client.SaveTo(ctx, path, out)
+			}
+			return s.client.Save(ctx, path, archivePath)
+		})
 		result.LayoutPath = ""
 		return result, err
 	})
@@ -157,6 +178,19 @@ func (s *Store) Save(ctx context.Context, reference, archivePath string) (bale.A
 // Load validates an archive before retaining its root. Its temporary extraction
 // is private and is removed after shared-CAS import; roots share their blobs.
 func (s *Store) Load(ctx context.Context, archivePath string, tags []string) (result bale.ArchiveResult, retErr error) {
+	return s.load(ctx, archivePath, nil, tags)
+}
+
+// LoadFrom verifies an archive stream before retaining its root and optional
+// names. It leaves the reader open and removes its private temporary state.
+func (s *Store) LoadFrom(ctx context.Context, in io.Reader, tags []string) (bale.ArchiveResult, error) {
+	if in == nil {
+		return bale.ArchiveResult{}, fmt.Errorf("archive reader is required")
+	}
+	return s.load(ctx, "", in, tags)
+}
+
+func (s *Store) load(ctx context.Context, archivePath string, in io.Reader, tags []string) (result bale.ArchiveResult, retErr error) {
 	if err := validateTags(tags); err != nil {
 		return result, err
 	}
@@ -167,7 +201,11 @@ func (s *Store) Load(ctx context.Context, archivePath string, tags []string) (re
 		}
 		defer func() { operationErr = errors.Join(operationErr, os.RemoveAll(stage)) }()
 		layout := filepath.Join(stage, "layout")
-		result, err = s.client.Load(ctx, archivePath, layout)
+		if in != nil {
+			result, err = s.client.LoadFrom(ctx, in, layout)
+		} else {
+			result, err = s.client.Load(ctx, archivePath, layout)
+		}
 		result.LayoutPath = ""
 		if err != nil {
 			return err

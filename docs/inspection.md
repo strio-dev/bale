@@ -36,12 +36,13 @@ A successful comparison exits 0 even when bundles differ. See [comparison rules]
 Export publication paths from a stored bundle or a remote bundle:
 
 ```sh
-bale inspect --registry registry.example.com/bundles/release:v1 \
-  --output-delivery bale.delivery.yaml
-bale inspect release:v1 --output-delivery local.delivery.yaml
+bale delivery export --registry registry.example.com/bundles/release:v1 \
+  -o bale.delivery.yaml
+bale delivery export release:v1 -o local.delivery.yaml
+bale delivery export --layout ./offline
 ```
 
-Use a new file and edit its paths before [delivery](transfers.md#export-delivery-paths). Export takes one bundle and replaces normal inspection output; it cannot be combined with `--format`.
+Export takes one bundle and writes YAML to stdout by default, including with `-o -`. Use `-o FILE` for a new file and edit its paths before [delivery](transfers.md#export-delivery-paths).
 
 Registry export and export from a local metadata capture verify metadata without downloading payloads or checking their availability. Complete stored bundles and explicit file layouts receive full graph validation. Re-exporting produces defaults rather than recovering earlier edits.
 

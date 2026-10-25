@@ -59,6 +59,8 @@ return err
 
 `local.Save` hydrates missing payloads into the shared store from pinned source digests, then exports a complete, deduplicated OCI-layout tar archive. Supply credentials and transport options on the client. The bundle digest is unchanged; subsequent local inspection reports complete content. Save of a complete stored bundle and `local.Load` are offline. Archive output paths must be new.
 
+`local.SaveTo(ctx, name, writer)` and `local.LoadFrom(ctx, reader, tags)` provide the same operations for streams. The client has matching `SaveTo` and `LoadFrom` methods for standalone layouts. Readers and writers remain caller-owned; failed writes can leave a partial archive. Import stages the stream once for verification before retaining its root.
+
 | Operation | Managed store API |
 | --- | --- |
 | Capture metadata | `local.Create(ctx, recipe, options)` |

@@ -18,7 +18,7 @@ Usage:
 Available Commands:
   generate    Run a Wasm producer and output dependency declaration YAML
   attach      Attach a dependency declaration to an existing artifact
-  list        List dependency declaration descriptors for an artifact
+  list (ls)   List dependency declaration descriptors for an artifact
   inspect     Inspect dependency declaration payloads for an artifact
 
 Options:
@@ -33,8 +33,12 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 		}
 		return 0
 	}
-	command := "dependencies " + args[1]
-	if args[1] != "attach" && args[1] != "list" && args[1] != "inspect" && args[1] != "generate" {
+	action := args[1]
+	if action == "ls" {
+		action = "list"
+	}
+	command := "dependencies " + action
+	if action != "attach" && action != "list" && action != "inspect" && action != "generate" {
 		return fail(errOut, fmt.Errorf("unsupported command; see bale dependencies --help"))
 	}
 	opts, err := parseCommand(command, args[2:])
@@ -42,12 +46,12 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 		return fail(errOut, fmt.Errorf("%w\nSee 'bale %s --help'", err, command))
 	}
 	if opts.help {
-		if _, err := fmt.Fprintln(out, dependencyCommandHelp(args[1])); err != nil {
+		if _, err := fmt.Fprintln(out, dependencyCommandHelp(action)); err != nil {
 			return fail(errOut, err)
 		}
 		return 0
 	}
-	if args[1] == "generate" {
+	if action == "generate" {
 		return runDependencyGeneration(ctx, opts, out, errOut)
 	}
 	if len(opts.args) != 1 {
@@ -59,12 +63,12 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 	if err := explicitReference(opts.args[0], false); err != nil {
 		return fail(errOut, err)
 	}
-	formatter, err := newOutputFormatter(opts.format, args[1] != "attach")
+	formatter, err := newOutputFormatter(opts.format, action != "attach")
 	if err != nil {
 		return fail(errOut, err)
 	}
 	var declaration bale.DependencyDeclaration
-	if args[1] == "attach" {
+	if action == "attach" {
 		declaration, err = readDependencySource(ctx, opts)
 		if err != nil {
 			return fail(errOut, err)
@@ -72,7 +76,7 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 	}
 	var progressErr error
 	var progress func(bale.Progress)
-	if args[1] == "attach" && !opts.quiet {
+	if action == "attach" && !opts.quiet {
 		progress = func(event bale.Progress) {
 			if progressErr == nil {
 				progressErr = writeProgress(errOut, event)
@@ -83,7 +87,7 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 	if err != nil {
 		return fail(errOut, err)
 	}
-	if args[1] == "inspect" {
+	if action == "inspect" {
 		declarations, err := client.InspectDependencies(ctx, opts.args[0])
 		if err != nil {
 			return fail(errOut, err)
@@ -93,7 +97,7 @@ func runDependencies(ctx context.Context, args []string, out, errOut io.Writer) 
 		}
 		return 0
 	}
-	if args[1] == "list" {
+	if action == "list" {
 		descriptors, err := client.ListReferrers(ctx, opts.args[0], bale.ListReferrersOptions{ArtifactType: bale.DependencyArtifactType})
 		if err != nil {
 			return fail(errOut, err)
@@ -140,11 +144,11 @@ func writeDependencyResults[T any](out io.Writer, formatter *outputFormatter, re
 
 func dependencyCommandHelp(command string) string {
 	if command == "generate" {
-		return "Run an OCI WASIp1 producer and write validated dependency declaration YAML.\n\nUsage:\n  bale dependencies generate [options]\n\nOptions:\n" + dependencyPluginOptions + "\n      --plain-http HOST   Permit HTTP for this exact registry host (repeatable)\n  -h, --help              Help for dependencies generate\n\nExamples:\n  bale dependencies generate --plugin registry.example.com/plugins/helm:0.1 --input request.json > dependencies.yaml"
+		return "Run an OCI WASIp1 producer and write validated dependency declaration YAML.\n\nUsage:\n  bale dependencies generate [options]\n\nOptions:\n" + dependencyPluginOptions + "\n      --authfile FILE     Registry authentication file\n      --plain-http HOST   Permit HTTP for this exact registry host (repeatable)\n  -h, --help              Help for dependencies generate\n\nExamples:\n  bale dependencies generate --plugin registry.example.com/plugins/helm:0.1 --input request.json > dependencies.yaml"
 	}
 	description := "Attach a YAML dependency declaration as an OCI referrer. Only the subject is resolved; dependency references remain selectors."
 	usage := "bale dependencies attach [options] SUBJECT"
-	options := "  -f, --file FILE         Dependency declaration YAML (or use --plugin and --input)\n" + dependencyPluginOptions + "\n      --format FORMAT     Output JSON or a Go template (default: attachment digest)\n  -q, --quiet             Suppress progress output"
+	options := "  -f, --file FILE         Dependency declaration YAML; - reads stdin (or use --plugin and --input)\n" + dependencyPluginOptions + "\n      --format FORMAT     Output JSON or a Go template (default: attachment digest)\n  -q, --quiet             Suppress progress output"
 	example := "bale dependencies attach registry.example.com/charts/web:1.4 -f dependencies.yaml"
 	if command == "list" {
 		description = "List verified dependency declaration descriptors for an artifact."
@@ -158,5 +162,5 @@ func dependencyCommandHelp(command string) string {
 		options = "  -f, --format FORMAT     Output JSON or a Go template per declaration (default: json)"
 		example = "bale dependencies inspect registry.example.com/charts/web:1.4 -f '{{.Declaration.Context}} {{json .Declaration.Dependencies}}'"
 	}
-	return description + "\n\nUsage:\n  " + usage + "\n\nOptions:\n" + options + "\n      --plain-http HOST   Permit HTTP for this exact registry host (repeatable)\n  -h, --help              Help for dependencies " + command + "\n\nExamples:\n  " + example + "\n\nRegistry references require an explicit host and tag or digest."
+	return description + "\n\nUsage:\n  " + usage + "\n\nOptions:\n" + options + "\n      --authfile FILE     Registry authentication file\n      --plain-http HOST   Permit HTTP for this exact registry host (repeatable)\n  -h, --help              Help for dependencies " + command + "\n\nExamples:\n  " + example + "\n\nRegistry references require an explicit host and tag or digest."
 }

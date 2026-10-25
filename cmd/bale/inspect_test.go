@@ -254,7 +254,7 @@ func TestInspectAndPullRemoteReadOnlyCapturedContent(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "delivery.yaml")
 	out.Reset()
 	errs.Reset()
-	if code := run([]string{"inspect", "--registry", reference, "--plain-http", host, "--output-delivery", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
+	if code := run([]string{"delivery", "export", "--registry", reference, "--plain-http", host, "-o", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
 		t.Fatalf("remote export exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	raw, err := os.ReadFile(output)

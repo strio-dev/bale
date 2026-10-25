@@ -10,7 +10,7 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 | `pull` / `push` | Download a bundle into the store or deliver a stored bundle. |
 | `save` / `load` | Write or restore an offline OCI archive. |
 | `inspect` / `diff` | Read inventory or compare two snapshots. |
-| `delivery update` | Carry edited paths forward to a refreshed snapshot. |
+| `delivery export` / `update` | Export publication paths or carry edits forward to a refreshed snapshot. |
 | `dependencies generate` / `attach` | Produce or attach a dependency declaration. |
 | `dependencies list` / `inspect` | Read declaration descriptors or payloads. |
 | `destinations inspect` | Read delivered dependency mappings for an artifact. |
@@ -19,21 +19,27 @@ Use `bale COMMAND --help` for a command's complete flags and operands. Options c
 | `tag` / `rm` / `prune` | Manage local names and retained bundles, or reclaim unreferenced content. |
 | `version` | Print the CLI version. |
 
-Bundle operands default to local names or IDs. `inspect`, `diff` and `delivery update` require `--registry` for remote references. `create`, `pull` and `load` accept repeatable `--tag/-t` names and print the retained bundle digest. Creation and loading need no positional output path; pull takes only its registry reference.
+Bundle operands default to local names or IDs. Exact local names take precedence over unambiguous short bundle IDs; ambiguous prefixes fail. `inspect`, `diff` and delivery commands require `--registry` for remote references. `create`, `pull` and `load` accept repeatable `--tag/-t` names and print the retained bundle digest. Creation and loading need no positional output path; pull takes only its registry reference.
 
 The default store is `$XDG_DATA_HOME/bale`, or `~/.local/share/bale` when `XDG_DATA_HOME` is unset. Global `--store PATH` selects another store and may appear before or after the command. Shared blobs are stored once by digest. `rm` removes retained references; `prune` explicitly reclaims unreferenced content.
 
 `-f` means `--file` for creation and authoring commands, and `--format` for inspection and comparison. Repeat `--plain-http` and `--map` when needed; duplicate single-value options are rejected.
 
+`ls` shows 12-character bundle IDs; `--no-trunc` prints complete digests and `-q/--quiet` prints only IDs. JSON and templates retain full digests. `dependencies ls` is an alias for `dependencies list`.
+
+Use `create -f -` or `dependencies attach -f -` to read YAML from stdin. Plugin requests also accept `--input -`, with the same 8 MiB limit as file input.
+
 ## Output and errors
 
 | Operation | Default output |
 | --- | --- |
-| Transfers, archive operations, attachment and plugin publication | Result digest. |
+| Transfers, load, save to a file, attachment and plugin publication | Result digest. |
+| `save` without `-o FILE`, or with `-o -` | OCI archive bytes on stdout. |
 | Bundle, dependency and destination inspection | JSON array. |
 | `create --dry-run` / `push --dry-run` | Readable inventory / delivery plan. |
 | `diff` / `delivery update` | Readable comparison / update report. |
 | `dependencies generate` | Dependency declaration YAML. |
+| `delivery export` | Delivery YAML on stdout, or a new file selected with `-o FILE`. |
 
 Transfers write progress to stderr; `--quiet` suppresses it. Commands offering `--format` accept `json` or a Go template. Templates run once per item for inspection arrays and once against the result for other commands:
 
@@ -41,6 +47,8 @@ Transfers write progress to stderr; `--quiet` suppresses it. Commands offering `
 bale inspect release:v1 -f '{{.Descriptor.Digest}}'
 bale inspect release:v1 --format json
 ```
+
+`save` defaults to stdout and `load` to stdin; `-o/--output FILE` and `-i/--input FILE` select files, with `-` selecting the corresponding stream. Archive output to a terminal is refused. Saving to stdout emits only archive bytes; `--format` requires a named output file. `tag` and `rm` have no output-format option.
 
 Template helpers are `json`, `join`, `split`, `lower` and `upper`. Missing keys are errors; output is buffered so a failed template does not print a partial result.
 
@@ -50,7 +58,7 @@ On failed `create`, `pull` or `push`, explicit JSON output can retain a result d
 
 ## Validation and previews
 
-Default creation retains a source-dependent metadata capture in the managed store. `create --layout` downloads a complete local layout; `create --registry` stores the complete graph in the supplied registry repository. These options are mutually exclusive. With `--layout`, create/pull/load require an explicit output directory, and inspect/diff/delivery update/push/save take standalone layout paths instead of local store names.
+Default creation retains a source-dependent metadata capture in the managed store. `create --layout` downloads a complete local layout; `create --registry` stores the complete graph in the supplied registry repository. These options are mutually exclusive. With `--layout`, create/pull/load require an explicit output directory, and inspect/diff/delivery/push/save take standalone layout paths instead of local store names.
 
 Local inspection, delivery export and push preview verify metadata captures without source access. Inspection reports and JSON push plans identify them with `metadataOnly: true`. Complete layouts also receive full payload validation. Diff, delivery update and registry delivery-file export read verified metadata without checking opaque payload availability. Destination inspection validates its attached metadata without following recorded locations.
 
@@ -60,7 +68,7 @@ Push reads missing payloads from a metadata capture's pinned sources, reusing de
 
 ## Credentials and transport
 
-Bale reads Docker credentials from `DOCKER_CONFIG`, or the usual Docker config directory, and uses system certificate trust. Set `SSL_CERT_FILE` to supply a CA file where needed. Permit HTTP only for a selected host with `--plain-http HOST`. See [registry configuration](../registry.md#authentication-and-transport).
+Registry operations select a Docker-compatible credential file with `--authfile FILE`, then `REGISTRY_AUTH_FILE`. When neither is set, Bale uses `DOCKER_CONFIG` or the usual Docker config directory. Bale uses system certificate trust; set `SSL_CERT_FILE` to supply a CA file. Permit HTTP only for a selected host with `--plain-http HOST`. Local-only management commands have no registry flags. See [registry configuration](../registry.md#authentication-and-transport).
 
 Discovery execution has its own [runtime limits and cache settings](plugin-runtime.md). Locked pulls, archive operations and inspection do not execute plugins.
 
@@ -72,7 +80,7 @@ A delivery file binds to one bundle digest. Rows identify manifests and indexes 
 
 Explicit paths override repository-wide `--map` settings; omitted rows use normal mapping. Unknown or duplicate identities, invalid paths and mismatched bundle digests fail before publication. Required graph/referrer relationships can create additional colocated copies.
 
-Exports require a new file and regenerate defaults. Authored paths are separate from bundle content.
+`delivery export BUNDLE` writes YAML to stdout; `-o FILE` requires a new file and `-o -` selects stdout explicitly. Exports regenerate defaults. Authored paths are separate from bundle content.
 
 ### Matching delivery paths
 

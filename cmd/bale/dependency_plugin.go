@@ -14,12 +14,12 @@ import (
 )
 
 const pluginRuntimeOptions = `      --plugin-cache DIR  Private compiled cache (default: user cache/bale/plugins; empty disables)
-      --plugin-memory N   Guest linear memory bytes, multiple of 65536 (default: 268435456)
+      --plugin-memory SIZE  Guest linear memory limit, e.g. 256MiB (default: 256MiB)
       --plugin-timeout D  Execution timeout, excluding compilation (default: 30s)`
 
 const dependencyPluginOptions = `      --plugin REF        OCI WASIp1 dependency producer (requires --input)
       --plugin-file FILE  Local Wasm producer for development (requires --input)
-      --input FILE        Plugin-defined JSON request
+      --input FILE        Plugin-defined JSON request; - reads stdin
 ` + pluginRuntimeOptions
 
 func pluginOptions(opts commandOptions) (plugin.Options, error) {
@@ -49,7 +49,7 @@ func readDependencySource(ctx context.Context, opts commandOptions) (bale.Depend
 		if opts.pluginOptionsSet {
 			return bale.DependencyDeclaration{}, fmt.Errorf("--file cannot be combined with plugin options")
 		}
-		raw, err := os.ReadFile(opts.file)
+		raw, err := readInputFileLimit(opts.file, bale.DependencyMaxBytes)
 		if err != nil {
 			return bale.DependencyDeclaration{}, err
 		}
@@ -68,25 +68,10 @@ func readDependencySource(ctx context.Context, opts commandOptions) (bale.Depend
 	}
 	// Bound file reads before allocating the request. The SDK applies the same
 	// bound to callers' byte slices before invoking the runtime.
-	f, err := os.Open(opts.pluginInput)
-	if err != nil {
-		return bale.DependencyDeclaration{}, err
-	}
-	defer func() { _ = f.Close() }()
 	const maxInput = 8 << 20
-	info, err := f.Stat()
+	input, err := readInputFileLimit(opts.pluginInput, maxInput)
 	if err != nil {
-		return bale.DependencyDeclaration{}, err
-	}
-	if !info.Mode().IsRegular() || info.Size() > maxInput {
-		return bale.DependencyDeclaration{}, fmt.Errorf("plugin input must be a regular file at most %d bytes", maxInput)
-	}
-	input, err := io.ReadAll(io.LimitReader(f, maxInput+1))
-	if err != nil {
-		return bale.DependencyDeclaration{}, err
-	}
-	if len(input) > maxInput {
-		return bale.DependencyDeclaration{}, fmt.Errorf("plugin input exceeds %d bytes", maxInput)
+		return bale.DependencyDeclaration{}, fmt.Errorf("plugin %w", err)
 	}
 	options, err := pluginOptions(opts)
 	if err != nil {

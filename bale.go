@@ -2,6 +2,7 @@ package bale
 
 import (
 	"context"
+	"io"
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 
@@ -276,10 +277,22 @@ func (c *Client) Save(ctx context.Context, layoutPath, archivePath string) (Arch
 	return c.service.Save(ctx, layoutPath, archivePath)
 }
 
+// SaveTo writes a verified OCI tar to out without closing it. The bundle digest
+// is preserved; a failed stream can contain a partial archive.
+func (c *Client) SaveTo(ctx context.Context, layoutPath string, out io.Writer) (ArchiveResult, error) {
+	return c.service.SaveTo(ctx, layoutPath, out)
+}
+
 // Load restores a verified OCI tar archive to a new bundle layout directory.
 // It leaves the archive unchanged and performs no network or plugin operations.
 func (c *Client) Load(ctx context.Context, archivePath, layoutPath string) (ArchiveResult, error) {
 	return c.service.Load(ctx, archivePath, layoutPath)
+}
+
+// LoadFrom verifies an OCI tar from in before publishing a new layout directory.
+// It stages the stream for random access and does not close the caller's reader.
+func (c *Client) LoadFrom(ctx context.Context, in io.Reader, layoutPath string) (ArchiveResult, error) {
+	return c.service.LoadFrom(ctx, in, layoutPath)
 }
 
 // EncodeDeliveryFile produces deterministic YAML without mutating the caller.

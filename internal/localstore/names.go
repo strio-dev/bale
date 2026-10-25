@@ -55,3 +55,30 @@ func selector(value string) (digest.Digest, string, error) {
 	name, err := NormalizeTag(value)
 	return "", name, err
 }
+
+// shortID recognizes digest prefixes, leaving ordinary local names unchanged.
+// Bare prefixes select SHA-256 roots; other algorithms must be explicit.
+func shortID(value string) (string, error) {
+	if strings.ContainsAny(value, "/@") {
+		return "", nil
+	}
+	algorithm, encoded := digest.SHA256, value
+	qualified := false
+	if name, rest, ok := strings.Cut(value, ":"); ok {
+		algorithm, encoded, qualified = digest.Algorithm(name), rest, true
+		if !algorithm.Available() {
+			return "", nil
+		}
+	}
+	hex := encoded != ""
+	for _, c := range encoded {
+		hex = hex && (c >= '0' && c <= '9' || c >= 'a' && c <= 'f')
+	}
+	if !qualified && (!hex || len(encoded) < 12) {
+		return "", nil
+	}
+	if !hex || len(encoded) < 12 || len(encoded) > algorithm.Size()*2 {
+		return "", fmt.Errorf("invalid bundle ID %q: expected 12 to %d lowercase hexadecimal characters", value, algorithm.Size()*2)
+	}
+	return algorithm.String() + ":" + encoded, nil
+}

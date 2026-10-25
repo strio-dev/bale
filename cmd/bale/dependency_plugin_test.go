@@ -62,6 +62,41 @@ func TestDependencyGenerate(t *testing.T) {
 	}
 }
 
+func TestDependencyStdin(t *testing.T) {
+	t.Run("declaration", func(t *testing.T) {
+		withInput(t, "context: production\ndependencies:\n  - ref: example.com/app:stable\n")
+		declaration, err := readDependencySource(t.Context(), commandOptions{file: "-"})
+		if err != nil || declaration.Context != "production" || len(declaration.Dependencies) != 1 {
+			t.Fatalf("stdin declaration: %+v: %v", declaration, err)
+		}
+	})
+	t.Run("request", func(t *testing.T) {
+		module, _ := pluginFiles(t, `{"schemaVersion":1,"dependencies":[{"ref":"example.com/app:stable"}]}`, 0)
+		withInput(t, `{}`)
+		var out, errs bytes.Buffer
+		args := []string{"dependencies", "generate", "--plugin-file", module, "--input", "-", "--plugin-cache=", "--plugin-memory", "256MiB"}
+		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+			t.Fatalf("stdin request: exit %d stdout %s stderr %s", code, &out, &errs)
+		}
+		if declaration, err := bale.ParseDependencyDeclaration(out.Bytes()); err != nil || len(declaration.Dependencies) != 1 {
+			t.Fatalf("generated YAML: %s: %v", &out, err)
+		}
+	})
+	t.Run("request limit", func(t *testing.T) {
+		withInput(t, strings.Repeat(" ", (8<<20)+1))
+		_, err := readDependencySource(t.Context(), commandOptions{pluginModule: "not-executed", pluginInput: "-", pluginCacheSet: true})
+		if err == nil || !strings.Contains(err.Error(), "exceeds 8388608 bytes") {
+			t.Fatalf("stdin request limit: %v", err)
+		}
+	})
+	t.Run("declaration limit", func(t *testing.T) {
+		withInput(t, strings.Repeat(" ", int(bale.DependencyMaxBytes)+1))
+		if _, err := readDependencySource(t.Context(), commandOptions{file: "-"}); err == nil {
+			t.Fatal("accepted oversized declaration")
+		}
+	})
+}
+
 func TestDependencyPluginRejectsBeforeRegistry(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,5 +225,16 @@ func TestDependencyPluginAttach(t *testing.T) {
 	declarations, err := client.InspectDependencies(context.Background(), host+"/app:subject")
 	if err != nil || len(declarations) != 1 || declarations[0].Declaration.Context != "test" || len(declarations[0].Declaration.Dependencies) != 1 || declarations[0].Declaration.Dependencies[0].Ref != "unreachable.invalid/image:stable" {
 		t.Fatalf("published declarations %+v: %v", declarations, err)
+	}
+	withInput(t, "context: stdin\ndependencies:\n  - ref: unreachable.invalid/image:stable\n")
+	out.Reset()
+	errs.Reset()
+	args = []string{"dependencies", "attach", host + "/app:subject", "--plain-http", host, "-f", "-", "-q"}
+	if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("attach stdin: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
+	declarations, err = client.InspectDependencies(t.Context(), host+"/app:subject")
+	if err != nil || len(declarations) != 1 || declarations[0].Declaration.Context != "stdin" {
+		t.Fatalf("stdin declaration: %+v: %v", declarations, err)
 	}
 }

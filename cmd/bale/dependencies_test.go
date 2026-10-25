@@ -28,6 +28,8 @@ func TestDependenciesHelpAndFlags(t *testing.T) {
 		{[]string{"help", "dependencies", "attach"}, "bale dependencies attach [options] SUBJECT"},
 		{[]string{"dependencies", "list", "--help"}, "bale dependencies list [options] SUBJECT"},
 		{[]string{"help", "dependencies", "list"}, "bale dependencies list [options] SUBJECT"},
+		{[]string{"dependencies", "ls", "--help"}, "bale dependencies list [options] SUBJECT"},
+		{[]string{"help", "dependencies", "ls"}, "bale dependencies list [options] SUBJECT"},
 		{[]string{"dependencies", "inspect", "--help"}, "bale dependencies inspect [options] SUBJECT"},
 		{[]string{"help", "dependencies", "inspect"}, "bale dependencies inspect [options] SUBJECT"},
 	} {
@@ -202,12 +204,14 @@ func TestDependenciesInspectEmptyRegistry(t *testing.T) {
 	}))
 	defer server.Close()
 	host := strings.TrimPrefix(server.URL, "http://")
-	args := []string{"dependencies", "inspect", host + "/app:stable", "--plain-http", host}
-	var out, errs bytes.Buffer
-	if code := run(args, &out, &errs); code != 0 || out.String() != "[]\n" || errs.Len() != 0 {
-		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
-	}
-	if code := run(args, brokenWriter{}, &errs); code != 125 || !strings.Contains(errs.String(), "write failed") {
-		t.Fatalf("output error exit %d stderr %s", code, &errs)
+	for _, action := range []string{"inspect", "list", "ls"} {
+		args := []string{"dependencies", action, host + "/app:stable", "--plain-http", host}
+		var out, errs bytes.Buffer
+		if code := run(args, &out, &errs); code != 0 || out.String() != "[]\n" || errs.Len() != 0 {
+			t.Fatalf("%s: exit %d stdout %s stderr %s", action, code, &out, &errs)
+		}
+		if code := run(args, brokenWriter{}, &errs); code != 125 || !strings.Contains(errs.String(), "write failed") {
+			t.Fatalf("output error exit %d stderr %s", code, &errs)
+		}
 	}
 }

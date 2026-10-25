@@ -123,7 +123,7 @@ Create, authorized latest pull and manual generation accept these settings:
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--plugin-cache DIR` | User cache directory under `bale/plugins` | Trusted compiled-code cache; `--plugin-cache ''` disables it. |
-| `--plugin-memory BYTES` | `268435456` (256 MiB) | Guest linear-memory limit; multiple of 65,536 bytes, at most 4 GiB. |
+| `--plugin-memory SIZE` | `256MiB` | Guest linear-memory limit; bytes or `KiB`/`MiB`/`GiB`, a multiple of 65,536 bytes, at most 4 GiB. |
 | `--plugin-timeout DURATION` | `30s` | Guest execution timeout, excluding compilation. |
 
 Helm's [`extism/v1` runtime](https://github.com/helm/helm/blob/v4.3.0/internal/plugin/runtime_extismv1.go) uses a different entry point and host APIs. Bale's discovery modules are not interchangeable with Helm Extism plugins. The native Bale Helm consumer uses Helm's `postrenderer/v1` subprocess contract instead.

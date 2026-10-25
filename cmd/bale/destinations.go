@@ -27,6 +27,7 @@ Usage:
 Options:
   -f, --format FORMAT     Output JSON or a Go template per record (default: json)
       --plain-http HOST   Permit HTTP for this exact registry host (repeatable)
+      --authfile FILE     Registry authentication file
   -h, --help              Help for destinations inspect
 
 Examples:

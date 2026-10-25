@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
@@ -377,22 +378,44 @@ func (s *Session) record(ctx context.Context, current *index, d digest.Digest) (
 	sort.Strings(names)
 	return Record{Entry: Entry{Descriptor: root, Names: names, MetadataOnly: missing}, Capture: state}, nil
 }
-func resolve(current *index, value string) (digest.Digest, error) {
-	id, name, err := selector(value)
-	if err != nil {
-		return "", err
+func resolve(current *index, value string) (id digest.Digest, name string, err error) {
+	// Exact local names take precedence over bare IDs and digest-looking tags.
+	if normalized, normalizeErr := NormalizeTag(value); normalizeErr == nil {
+		if target, exists := current.names[normalized]; exists {
+			id, name = target, normalized
+		}
 	}
 	if id == "" {
-		id = current.names[name]
+		id, name, err = selector(value)
+		if err != nil {
+			return "", "", err
+		}
+		if id == "" {
+			prefix, prefixErr := shortID(value)
+			if prefixErr != nil {
+				return "", "", prefixErr
+			}
+			if prefix != "" {
+				name = ""
+				for candidate := range current.roots {
+					if strings.HasPrefix(candidate.String(), prefix) {
+						if id != "" {
+							return "", "", fmt.Errorf("ambiguous bundle ID %q; use a longer digest", value)
+						}
+						id = candidate
+					}
+				}
+			}
+		}
 	}
 	if _, ok := current.roots[id]; !ok {
-		return "", &transport.Error{Op: "resolve local bundle", Kind: transport.ErrNotFound, Cause: fmt.Errorf("%w: %q", errdef.ErrNotFound, value)}
+		return "", "", &transport.Error{Op: "resolve local bundle", Kind: transport.ErrNotFound, Cause: fmt.Errorf("%w: %q", errdef.ErrNotFound, value)}
 	}
-	return id, nil
+	return id, name, nil
 }
 func (s *Session) Resolve(ctx context.Context, value string) (result Record, retErr error) {
 	retErr = s.metadata(ctx, func(current *index) error {
-		id, err := resolve(current, value)
+		id, _, err := resolve(current, value)
 		if err != nil {
 			return err
 		}
@@ -500,7 +523,7 @@ func (s *Session) Tag(ctx context.Context, reference string, names []string) err
 		}
 	}
 	return s.metadata(ctx, func(current *index) error {
-		id, err := resolve(current, reference)
+		id, _, err := resolve(current, reference)
 		if err != nil {
 			return err
 		}
@@ -516,15 +539,11 @@ func (s *Session) Remove(ctx context.Context, references []string) error {
 	}
 	return s.metadata(ctx, func(current *index) error {
 		for _, reference := range references {
-			id, err := resolve(current, reference)
+			id, name, err := resolve(current, reference)
 			if err != nil {
 				return err
 			}
-			direct, name, err := selector(reference)
-			if err != nil {
-				return err
-			}
-			if direct != "" {
+			if name == "" {
 				delete(current.roots, id)
 				for alias, target := range current.names {
 					if target == id {

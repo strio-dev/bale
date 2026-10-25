@@ -168,6 +168,30 @@ func TestDeliveryUpdateCLIFormatsAndReadOnlyInputs(t *testing.T) {
 	}
 }
 
+func TestDeliveryUpdateStdin(t *testing.T) {
+	before, _, _ := cliBundle(t)
+	after, root, _ := cliDeliveryRefresh(t, false)
+	input, _ := cliEditedDelivery(t, before)
+	raw, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withInput(t, string(raw))
+	output := filepath.Join(t.TempDir(), "updated.delivery.yaml")
+	var out, errs bytes.Buffer
+	args := []string{"delivery", "update", "--layout", before, after, "-f", "-", "-o", output}
+	if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("stdin update: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
+	raw, err = os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file, err := bale.DecodeDeliveryFile(raw); err != nil || file.Bundle != root.Digest || len(file.Artifacts) != 1 || file.Artifacts[0].Path != "images/custom" {
+		t.Fatalf("updated delivery: %s: %v", raw, err)
+	}
+}
+
 func TestDeliveryUpdateConflictReportsWithoutFile(t *testing.T) {
 	before, _, _ := cliBundle(t)
 	after, _, _ := cliDeliveryRefresh(t, true)

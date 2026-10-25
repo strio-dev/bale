@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,12 +40,102 @@ func TestReleasePublicationRegistryAcceptance(t *testing.T) {
 			t.Fatalf("%s must name its packaged file: %q (%v)", name, paths[i], err)
 		}
 	}
+	t.Run("preflight", func(t *testing.T) { runReleasePreflight(t, paths) })
 	for _, backend := range []struct{ name, binary string }{{"distribution", paths[7]}, {"zot", paths[8]}} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
 			runReleasePublication(t, ctx, paths, backend.name, backend.binary)
 		})
+	}
+}
+
+func runReleasePreflight(t *testing.T, paths []string) {
+	t.Helper()
+	dir := t.TempDir()
+	env := []string{"PATH=/nonexistent", "HOME=" + dir, "DOCKER_CONFIG=" + filepath.Join(dir, "docker"), "REGCTL_CONFIG=" + filepath.Join(dir, "regctl.json")}
+	fail := func(binary, expected string, args ...string) string {
+		t.Helper()
+		out, stderr, err := releasePublicationCommand(t.Context(), env, binary, args...)
+		if err == nil || len(out) != 0 || !strings.Contains(string(stderr), expected) {
+			t.Fatalf("%s %q: expected failure containing %q and empty stdout; got %v\nstdout: %s\nstderr: %s", filepath.Base(binary), args, expected, err, out, stderr)
+		}
+		return string(stderr)
+	}
+	for _, binary := range paths[:2] {
+		for _, args := range [][]string{nil, {"--plain-http"}} {
+			fail(binary, "Usage:", args...)
+		}
+	}
+	valid := "sha256:" + strings.Repeat("a", 64)
+	output := filepath.Join(dir, "output")
+	for _, args := range [][]string{
+		{"https://registry.invalid/bale", "123"},
+		{"registry.invalid/bale:version", "123"},
+		{"registry.invalid/bale@" + valid, "123"},
+		{"registry.invalid/org/../bale", "123"},
+		{"registry.invalid/org//bale", "123"},
+		{"registry.invalid/bale/", "123"},
+		{"registry.invalid/bale", ""},
+		{"registry.invalid/bale", "../escape"},
+		{"registry.invalid/bale", "two words"},
+		{"registry.invalid/bale", strings.Repeat("x", 82)},
+	} {
+		fail(paths[0], "", append(args, output)...)
+		if _, err := os.Stat(output); !os.IsNotExist(err) {
+			t.Fatalf("invalid stage arguments %q created output: %v", args, err)
+		}
+	}
+	if err := os.Mkdir(output, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(output, "flux-amd64.digest")
+	writeFile(t, marker, []byte("retained"))
+	fail(paths[0], "", "registry.invalid/bale", "123", output)
+	raw, err := os.ReadFile(marker)
+	if err != nil || string(raw) != "retained" {
+		t.Fatalf("existing output changed: %q (%v)", raw, err)
+	}
+	entries, err := os.ReadDir(output)
+	if err != nil || len(entries) != 1 || entries[0].Name() != filepath.Base(marker) {
+		t.Fatalf("existing output entries changed: %v (%v)", entries, err)
+	}
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	repository := strings.TrimPrefix(server.URL, "http://") + "/bale"
+	inputs := []string{"flux-amd64.digest", "flux-arm64.digest", "helm-consumer-amd64.digest", "helm-consumer-arm64.digest", "helm-discovery.digest"}
+	for _, missing := range inputs {
+		staged := t.TempDir()
+		for _, name := range inputs {
+			if name != missing {
+				writeFile(t, filepath.Join(staged, name), []byte(valid+"\n"))
+			}
+		}
+		fail(paths[1], missing, "--plain-http", repository, staged)
+	}
+	staged := t.TempDir()
+	for _, name := range inputs {
+		writeFile(t, filepath.Join(staged, name), []byte(valid+"\n"))
+	}
+	for _, invalid := range []string{"", "sha256:" + strings.Repeat("z", 64), "sha256:" + strings.Repeat("a", 63), "sha256:" + strings.Repeat("a", 65), valid + "\n" + valid} {
+		// Corrupt the last input to check the complete set before registry access.
+		writeFile(t, filepath.Join(staged, inputs[len(inputs)-1]), []byte(invalid))
+		fail(paths[1], "Expected a SHA-256 artifact digest", "--plain-http", repository, staged)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("digest preflight contacted the registry")
+	}
+	ownedOutput := filepath.Join(dir, "failed-output")
+	stderr := fail(paths[0], "", "--plain-http", repository, "123", ownedOutput)
+	if requests.Load() == 0 || strings.Contains(stderr, "unknown flag") {
+		t.Fatalf("plain HTTP staging did not reach the registry: %s", stderr)
+	}
+	if _, err := os.Stat(ownedOutput); !os.IsNotExist(err) {
+		t.Fatalf("failed stage retained its owned output: %v", err)
 	}
 }
 

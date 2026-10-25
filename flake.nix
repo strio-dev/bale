@@ -237,7 +237,6 @@
               flux-service-image
               flux-service-chart
               release
-              integration-release
               ;
           };
         };

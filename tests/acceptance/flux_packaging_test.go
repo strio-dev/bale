@@ -13,6 +13,7 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale"
 	"go.yaml.in/yaml/v3"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 )
 
@@ -58,9 +59,18 @@ func runFluxPackagingCycle(t *testing.T, ctx context.Context, paths []string, ki
 		t.Fatalf("packaged chart metadata: %+v (%v)", chartMetadata, err)
 	}
 	helm.run(nil, "push", paths[7], "oci://"+source.host+"/charts", "--plain-http")
-	chart, err := client.Resolve(ctx, source.host+"/charts/"+chartMetadata.Name+":"+chartMetadata.Version)
+	chartTag := strings.ReplaceAll(chartMetadata.Version, "+", "_")
+	chart, err := client.Resolve(ctx, source.host+"/charts/"+chartMetadata.Name+":"+chartTag)
 	if err != nil {
 		t.Fatal(err)
+	}
+	chartRaw, err := content.FetchAll(ctx, chart.Store, chart.Descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chartManifest v1.Manifest
+	if err := json.Unmarshal(chartRaw, &chartManifest); err != nil || chartManifest.Annotations[v1.AnnotationSource] != "https://github.com/strio-dev/bale" {
+		t.Fatalf("Helm publication omitted the chart source annotation: %v", err)
 	}
 	consumer := seedHelmConsumerPackage(t, ctx, client, paths[5], source.host)
 	plugin := source.host + "/plugins/helm:v1"
@@ -76,7 +86,7 @@ func runFluxPackagingCycle(t *testing.T, ctx context.Context, paths []string, ki
 	valuePath := filepath.Join(dir, "values.json")
 	writeFile(t, valuePath, valueJSON)
 	recipe := map[string]any{"include": []any{
-		map[string]any{"ref": chart.Repository + ":" + chartMetadata.Version, "plugin": map[string]any{
+		map[string]any{"ref": chart.Repository + ":" + chartTag, "plugin": map[string]any{
 			"ref":   plugin,
 			"input": map[string]any{"schemaVersion": 1, "release": "adapter", "namespace": "default", "context": "bootstrap", "values": values},
 			"blobs": map[string]any{"chart": map[string]string{"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip"}},

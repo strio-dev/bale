@@ -26,6 +26,8 @@ just distribution-build
 
 ## Publish artifacts
 
+To publish a local build to a custom registry:
+
 ```sh
 nix run --no-update-lock-file path:.#publish -- \
   helm-discovery registry.example.com/plugins/helm:1
@@ -45,6 +47,16 @@ OCI publication uses ORAS copy options, including `--to-registry-config` and `--
 
 ## Release a version
 
-After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1`. CI publishes Linux AMD64/ARM64 CLI archives, `SHA256SUMS` and the multiarchitecture `ghcr.io/strio-dev/bale` image. Integration artifacts use the publishing command above.
+After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1`. CI publishes Linux AMD64/ARM64 CLI archives and `SHA256SUMS` on GitHub, plus the complete OCI distribution:
 
-Only stable releases update `latest`. Container tags replace `+` with `_` for build metadata; binaries retain the exact version. CI assembles a draft before publication, preserves published versions on reruns and keeps older releases from replacing the current `latest` image.
+| Artifact | Published reference |
+| --- | --- |
+| Bale image | `ghcr.io/strio-dev/bale:VERSION_OCI` |
+| Flux adapter image | `ghcr.io/strio-dev/bale-flux:VERSION_OCI` |
+| Helm discovery plugin | `ghcr.io/strio-dev/bale/plugins/helm-discovery:VERSION_OCI` |
+| Native Helm plugin | `ghcr.io/strio-dev/bale/plugins/bale:VERSION_OCI-linux-ARCH` |
+| Flux bootstrap chart | `oci://ghcr.io/strio-dev/bale/charts/bale-flux` with `--version VERSION` |
+
+`VERSION` is the exact release tag; `VERSION_OCI` replaces `+` with `_`. Both images support AMD64 and ARM64. Native Helm packages use separate `amd64` and `arm64` tags because Helm does not select them from an index. Discovery and the chart publish once per release; chart metadata and binaries retain the exact version.
+
+CI publishes the GitHub release after the OCI artifacts succeed. Only stable releases update image `latest` aliases. Reruns preserve published version tags and keep older releases from replacing the current `latest` images. The publishing command above remains available for custom registries.

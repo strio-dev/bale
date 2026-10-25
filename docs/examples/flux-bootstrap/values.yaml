@@ -1,7 +1,7 @@
 # Deployment only: set this to the image's transferred location after push.
 image:
   repository: mirror.example.com/release/images/bale-flux
-  tag: dev
+  tag: VERSION_OCI
 imagePullSecrets:
   - name: destination-registry-auth
 existingConfigMap: bale-flux-releases

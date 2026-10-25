@@ -26,15 +26,20 @@
     name = "bale-container-index";
     runtimeInputs = [ regctl ];
     text = ''
-      if (( $# != 4 )); then
-        echo 'Usage: bale-container-index REPOSITORY TAG AMD64_DIGEST ARM64_DIGEST' >&2
+      if (( $# < 4 )); then
+        echo 'Usage: bale-container-index REPOSITORY TAG AMD64_DIGEST ARM64_DIGEST [regctl options]' >&2
         exit 2
       fi
       [[ "$3" =~ ^sha256:[0-9a-f]{64}$ ]]
       [[ "$4" =~ ^sha256:[0-9a-f]{64}$ ]]
-      exec regctl index create "$1:$2" \
-        --ref "$1@$3" --platform linux/amd64 \
-        --ref "$1@$4" --platform linux/arm64 \
+      repository="$1"
+      tag="$2"
+      amd64="$3"
+      arm64="$4"
+      shift 4
+      exec regctl "$@" index create "$repository:$tag" \
+        --ref "$repository@$amd64" --platform linux/amd64 \
+        --ref "$repository@$arm64" --platform linux/arm64 \
         --format '{{.Manifest.GetDescriptor.Digest}}'
     '';
   };

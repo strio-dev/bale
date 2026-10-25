@@ -4,6 +4,9 @@
   helm-consumer-archive,
   flux-service-image,
   flux-service-chart,
+  integration-release,
+  publish,
+  regctl,
   kubernetes-helm,
   distribution,
   zot,
@@ -38,6 +41,10 @@ writeShellApplication {
     export BALE_ACCEPTANCE_HELM_CONSUMER_ARCHIVE=${helm-consumer-archive}/${helm-consumer-archive.archiveName}
     export BALE_ACCEPTANCE_FLUX_IMAGE=${flux-service-image}
     export BALE_ACCEPTANCE_FLUX_CHART=${flux-service-chart}/bale-flux-${flux-service-chart.chartVersion}.tgz
+    export BALE_ACCEPTANCE_INTEGRATION_STAGE=${integration-release.integration-stage}/bin/bale-integration-stage
+    export BALE_ACCEPTANCE_INTEGRATION_PUBLISH=${integration-release.integration-publish}/bin/bale-integration-publish
+    export BALE_ACCEPTANCE_REGCTL=${regctl}/bin/regctl
+    export BALE_ACCEPTANCE_PUBLISH=${publish}/bin/bale-publish
     exec ${tests}/bin/registry-acceptance.test -test.v -test.count=1 -test.timeout=5m "$@"
   '';
 }

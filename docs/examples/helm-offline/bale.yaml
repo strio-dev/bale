@@ -1,7 +1,7 @@
 include:
   - ref: registry.example.com/charts/web:1.4
     plugin:
-      ref: registry.example.com/plugins/helm:1
+      ref: ghcr.io/strio-dev/bale/plugins/helm-discovery:VERSION_OCI
       input:
         schemaVersion: 1
         release: web
@@ -10,5 +10,5 @@ include:
       blobs:
         chart:
           mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
-  - ref: registry.example.com/plugins/bale:0.0.0-linux-amd64
+  - ref: ghcr.io/strio-dev/bale/plugins/bale:VERSION_OCI-linux-amd64
   - ref: registry.example.com/images/custom-web:2

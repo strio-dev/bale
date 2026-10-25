@@ -200,6 +200,21 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Stage integration artifacts
+        if: needs.matrix.outputs.published != 'true'
+        run: |
+          nix run --no-update-lock-file path:.#integration-stage -- \
+            "$IMAGE" "$GITHUB_RUN_ID" integration-digests
+      - name: Upload integration digests
+        if: needs.matrix.outputs.published != 'true'
+        uses: *upload-artifact
+        with:
+          name: integrations-${{ matrix.system }}
+          path: integration-digests/*
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
   vulnerabilities:
     name: Go vulnerability checks
     runs-on: ubuntu-24.04
@@ -280,7 +295,7 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
   release:
-    name: Publish binaries and containers
+    name: Publish release artifacts
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [matrix, quality, documentation, release-native, registry, integration, vulnerabilities]
     runs-on: ubuntu-24.04
@@ -330,6 +345,13 @@ jobs:
           pattern: container-*
           merge-multiple: true
           path: container-digests/
+      - name: Download integration digests
+        if: steps.state.outputs.published != 'true'
+        uses: *download-artifact
+        with:
+          pattern: integrations-*
+          merge-multiple: true
+          path: integration-digests/
       - name: Log in to GHCR
         uses: *registry-login
         with: *registry-credentials
@@ -340,6 +362,13 @@ jobs:
           amd64=$(cat container-digests/container-amd64.digest)
           arm64=$(cat container-digests/container-arm64.digest)
           digest=$(nix run --no-update-lock-file path:.#container-index -- "$IMAGE" "$IMAGE_TAG" "$amd64" "$arm64")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Publish integration artifacts
+        if: steps.state.outputs.published != 'true'
+        id: integrations
+        run: |
+          digest=$(nix run --no-update-lock-file path:.#integration-publish -- "$IMAGE" integration-digests/)
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - name: Upload release assets
@@ -377,9 +406,12 @@ jobs:
         if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published != 'true'
         env:
           PUBLISHED_DIGEST: ${{ steps.container.outputs.digest }}
+          PUBLISHED_FLUX_DIGEST: ${{ steps.integrations.outputs.digest }}
         run: |
           nix run --no-update-lock-file path:.#container-latest -- "$IMAGE" "$PUBLISHED_DIGEST"
+          nix run --no-update-lock-file path:.#container-latest -- "$IMAGE-flux" "$PUBLISHED_FLUX_DIGEST"
       - name: Retry latest container alias
         if: needs.matrix.outputs.prerelease != 'true' && steps.state.outputs.published == 'true' && steps.latest.outputs.current == 'true'
         run: |
           nix run --no-update-lock-file path:.#container-latest -- "$IMAGE" "$IMAGE_TAG"
+          nix run --no-update-lock-file path:.#container-latest -- "$IMAGE-flux" "$IMAGE_TAG"

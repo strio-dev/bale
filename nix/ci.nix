@@ -11,6 +11,7 @@ let
       "formatting"
       "justfile"
       "workflow"
+      "release-publication"
       "helm-plugin-integration"
       "wasm-contract-fixture"
     ] self.checks.x86_64-linux;

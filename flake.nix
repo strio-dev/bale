@@ -71,6 +71,8 @@
             inherit
               bale
               zot
+              integration-release
+              publish
               helm-plugin-archive
               helm-consumer-archive
               flux-service-image
@@ -115,6 +117,10 @@
               flux-service-image
               flux-service-chart
               ;
+          };
+          integration-release = pkgs.callPackage ./nix/integration-release.nix {
+            inherit version publish helm-consumer-archive;
+            container-index = release-commands.container-index;
           };
         in
         {
@@ -163,6 +169,10 @@
               type = "app";
               program = "${command}/bin/bale-${name}";
             }) (pkgs.lib.filterAttrs (_: pkgs.lib.isDerivation) release-commands)
+            // pkgs.lib.mapAttrs (name: command: {
+              type = "app";
+              program = "${command}/bin/bale-${name}";
+            }) (pkgs.lib.filterAttrs (_: pkgs.lib.isDerivation) integration-release)
             // {
               default = config.apps.bale;
               docs-preview = inputs.strio-theme.lib.mkPreview {
@@ -227,6 +237,7 @@
               flux-service-image
               flux-service-chart
               release
+              integration-release
               ;
           };
         };

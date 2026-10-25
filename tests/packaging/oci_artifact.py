@@ -36,6 +36,7 @@ assert manifest["mediaType"] == root["mediaType"]
 assert manifest.get("artifactType") == expected["artifactType"]
 assert "subject" not in manifest
 assert manifest["annotations"]["org.opencontainers.image.created"] == "1970-01-01T00:00:01Z"
+assert manifest["annotations"]["org.opencontainers.image.source"] == "https://github.com/strio-dev/bale"
 
 assert manifest["config"]["mediaType"] == "application/vnd.oci.empty.v1+json"
 assert blob(manifest["config"]) == b"{}"

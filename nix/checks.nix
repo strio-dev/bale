@@ -18,6 +18,7 @@
   flux-service-image,
   flux-service-chart,
   release,
+  integration-release,
 }:
 let
   quality = bale.overrideAttrs {
@@ -35,6 +36,14 @@ in
   build = bale;
   inherit container;
   release-binary = release.check;
+  release-publication =
+    pkgs.runCommand "bale-release-publication-check" { nativeBuildInputs = [ pkgs.python3 ]; }
+      ''
+        python3 ${./tests/integration_release.py} \
+          ${integration-release.integration-stage}/bin/bale-integration-stage \
+          ${integration-release.integration-publish}/bin/bale-integration-publish
+        touch "$out"
+      '';
   distribution-publish = publish;
   wasm-contract-fixture = pkgs.runCommand "bale-wasm-contract-fixture-check" { } ''
     cmp ${wasm-contract-fixture}/lib/bale/rust-producer.wasm ${../internal/wasm/testdata/rust-producer.wasm}

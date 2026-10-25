@@ -4,7 +4,7 @@ Carry a chart, its default images, a custom image and both Bale Helm plugins to 
 
 ## Prepare the recipe
 
-Build and publish your [discovery plugin](../../helm.md#publish-and-configure-discovery) and [native Helm plugin](../../helm.md#package-and-transfer). Copy [bale.yaml](bale.yaml) into a working directory and replace its placeholder references with your published chart, plugins and custom image. The native tag selects Linux AMD64; use a package matching your deployment machine.
+Use the released [discovery plugin](../../helm.md#publish-and-configure-discovery) and [native Helm plugin](../../helm.md#package-and-transfer). Copy [bale.yaml](bale.yaml) into a working directory, choose your chart and custom image, and replace `VERSION_OCI` with a released tag (`+` becomes `_`). The native tag selects Linux AMD64; use a package matching your deployment machine.
 
 Discovery renders chart defaults with release `web`, namespace `apps` and context `production`. All declared subcharts must already be packaged in the chart. Hooks are inspected, never executed during capture. The custom image is an ordinary explicit include for a later deployment override.
 
@@ -20,8 +20,8 @@ Creation reads discovery inputs and locks metadata locally. Keep source access a
 | Artifact | Delivery path |
 | --- | --- |
 | Chart `registry.example.com/charts/web` | `charts/web` |
-| Native plugin `registry.example.com/plugins/bale` | `plugins/bale` |
-| Discovery plugin `registry.example.com/plugins/helm` | `plugins/helm` |
+| Native plugin `ghcr.io/strio-dev/bale/plugins/bale` | `plugins/bale` |
+| Discovery plugin `ghcr.io/strio-dev/bale/plugins/helm-discovery` | `plugins/helm` |
 | Custom image `registry.example.com/images/custom-web` | `images/custom-web` |
 | Discovered images | Keep generated paths, or choose your own |
 
@@ -57,13 +57,13 @@ Adapt this to your chart's schema, such as separate `image.repository` and `imag
 Install into a Helm environment without an existing `bale` plugin:
 
 ```sh
-helm plugin install oci://mirror.example.com/release/plugins/bale:0.0.0-linux-amd64 --verify=false
+helm plugin install oci://mirror.example.com/release/plugins/bale:VERSION_OCI-linux-amd64 --verify=false
 helm bale --context production upgrade web \
   oci://mirror.example.com/release/charts/web:1.4 \
   --install --namespace apps --create-namespace --values values.yaml --wait
 ```
 
-The development package is unsigned, hence `--verify=false`. The adapter maps captured chart defaults to destination image digests, including supported hooks and init containers. Your explicit destination override passes through unchanged. Chart bytes stay intact; use ordinary Helm commands for rollback, history and uninstall.
+The package is unsigned, hence `--verify=false`. The adapter maps captured chart defaults to destination image digests, including supported hooks and init containers. Your explicit destination override passes through unchanged. Chart bytes stay intact; use ordinary Helm commands for rollback, history and uninstall.
 
 Plain Helm accepts the same values but will not relocate remaining source references in chart defaults. The [Flux adapter](../../flux.md) applies the same mappings through a ResourceSet; put the custom destination image in HelmRelease values.
 

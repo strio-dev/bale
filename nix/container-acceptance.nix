@@ -17,7 +17,7 @@ let
       # CLI transport tests deliberately replace the entire environment. Capture
       # their inputs before restoring the rootless Podman client's environment.
       containerEnv=()
-      for name in DOCKER_CONFIG XDG_CACHE_HOME SSL_CERT_FILE SSL_CERT_DIR PATH; do
+      for name in DOCKER_CONFIG XDG_CACHE_HOME XDG_DATA_HOME SSL_CERT_FILE SSL_CERT_DIR PATH; do
         if [[ -v "$name" ]]; then
           containerEnv+=(--env "$name=''${!name}")
         fi

@@ -20,11 +20,11 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-Capture the image and save an offline archive:
+Lock the image references, then download an offline archive:
 
 ```sh
-bale create --layout -f bale.yaml ./release
-bale save ./release -o release.tar
+bale create -f bale.yaml -t release:v1
+bale save release:v1 -o release.tar
 ```
 
 Follow the [first-bundle tutorial](https://bale.strio.dev/tutorials/first-bundle/) to inspect, restore and deliver it. The [documentation](https://bale.strio.dev/) covers registry transfers, Helm, Flux and the Go SDK.

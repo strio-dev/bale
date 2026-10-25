@@ -42,6 +42,7 @@ assert settings["WorkingDir"] == "/work"
 assert set(settings["Env"]) == {
     "HOME=/tmp",
     "XDG_CACHE_HOME=/cache",
+    "XDG_DATA_HOME=/data",
     "TMPDIR=/tmp",
     "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
 }
@@ -86,7 +87,7 @@ assert entries["bin/bale"].mode == 0o555
 assert files["etc/ssl/certs/ca-certificates.crt"] == certificates.read_bytes()
 assert b"bale:x:65532:65532:" in files["etc/passwd"]
 assert b"bale:x:65532:" in files["etc/group"]
-for directory in ("work", "tmp", "cache"):
+for directory in ("work", "tmp", "cache", "data"):
     assert entries[directory].isdir() and entries[directory].mode == 0o1777
 
 licenses = package / "share/licenses/bale"

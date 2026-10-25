@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	digest "github.com/opencontainers/go-digest"
+
 	"github.com/strio-dev/bale"
 	"github.com/strio-dev/bale/internal/wasmtest"
 	"github.com/strio-dev/bale/plugin"
@@ -53,12 +55,16 @@ func TestOfflineAcceptance(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
-			runOfflineCycle(t, ctx, paths[0], backend.name, backend.binary)
+			for _, metadataOnly := range []bool{false, true} {
+				t.Run(fmt.Sprintf("metadata-only=%t", metadataOnly), func(t *testing.T) {
+					runOfflineCycle(t, ctx, paths[0], backend.name, backend.binary, metadataOnly)
+				})
+			}
 		})
 	}
 }
 
-func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend string) {
+func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend string, metadataOnly bool) {
 	source := startRegistry(t, ctx, kind, backend, "offline source")
 	destination := startRegistry(t, ctx, kind, backend, "offline destination")
 	upstream, err := url.Parse("http://" + source.host)
@@ -93,8 +99,10 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		defer setPhase("after " + phase)
 		return command.run(phase, args...)
 	}
-	var readOnly atomic.Bool
-	var sourceReads, sourceWrites atomic.Int64
+	var readOnly, forbidOpaqueReads atomic.Bool
+	var sourceReads, sourceWrites, opaqueReads atomic.Int64
+	imageLayer := digest.FromBytes(make([]byte, 1024)).String()
+	componentPayload := digest.FromString("component-v1").String()
 	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +113,11 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 			trace.requests = append(trace.requests, fmt.Sprintf("phase=%q method=%s path=%q host=%q remote=%q user-agent=%q", trace.phase, r.Method, r.URL.RequestURI(), r.Host, r.RemoteAddr, r.UserAgent()))
 		}
 		trace.Unlock()
+		if forbidOpaqueReads.Load() && r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") && (strings.HasSuffix(r.URL.Path, imageLayer) || strings.HasSuffix(r.URL.Path, componentPayload)) {
+			opaqueReads.Add(1)
+			http.Error(w, "application payload GET forbidden during mount", http.StatusForbidden)
+			return
+		}
 		if readOnly.Load() {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				sourceWrites.Add(1)
@@ -112,6 +125,9 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 				return
 			}
 			sourceReads.Add(1)
+			if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") && (strings.HasSuffix(r.URL.Path, imageLayer) || strings.HasSuffix(r.URL.Path, componentPayload)) {
+				opaqueReads.Add(1)
+			}
 		}
 		proxy.ServeHTTP(w, r)
 	})))
@@ -170,29 +186,71 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	if err := os.Mkdir(dockerConfig, 0700); err != nil {
 		t.Fatal(err)
 	}
-	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"DOCKER_CONFIG=" + dockerConfig, "XDG_CACHE_HOME=" + filepath.Join(dir, "cache")}, hosts: []string{sourceHost, destination.host}}
+	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"DOCKER_CONFIG=" + dockerConfig, "XDG_CACHE_HOME=" + filepath.Join(dir, "cache"), "XDG_DATA_HOME=" + filepath.Join(dir, "data")}, hosts: []string{sourceHost, destination.host}}
 	readOnly.Store(true)
 	original := filepath.Join(dir, "release")
 	deliveryPath := filepath.Join(dir, "bale.delivery.yaml")
-	dry := decode[bale.CreateResult](t, run(command, "local capture preview", "create", "--layout", "-f", recipe, original, "--dry-run", "--format", "json"))
+	captureArgs := []string{"create", "--layout", "-f", recipe, original}
+	inspectArgs := []string{"inspect", "--layout", original}
+	if metadataOnly {
+		original = "offline:v1"
+		captureArgs = []string{"create", "-t", original, "-f", recipe}
+		inspectArgs = []string{"inspect", original}
+	}
+	dry := decode[bale.CreateResult](t, run(command, "local capture preview", append(append([]string{}, captureArgs...), "--dry-run", "--format", "json")...))
 	if dry.Published || !dry.DryRun || dry.LayoutPath != "" {
 		t.Fatal("local preview reported publication")
 	}
-	if _, err := os.Stat(original); !os.IsNotExist(err) {
+	if metadataOnly {
+		if _, _, code := command.execute("dry run retains no managed bundle", "inspect", original); code != 125 {
+			t.Fatalf("dry run retained a managed bundle: inspect exit %d", code)
+		}
+	} else if _, err := os.Stat(original); !os.IsNotExist(err) {
 		t.Fatal("dry run created a layout")
 	}
-	captured := decode[bale.CreateResult](t, run(command, "read-only local capture", "create", "--layout", "-f", recipe, original, "--output-delivery", deliveryPath, "--format", "json"))
-	if captured.Published || captured.LayoutPath != original || captured.Descriptor.Digest != dry.Descriptor.Digest {
+	captured := decode[bale.CreateResult](t, run(command, "read-only local capture", append(append([]string{}, captureArgs...), "--output-delivery", deliveryPath, "--format", "json")...))
+	if captured.MetadataOnly != metadataOnly || (metadataOnly && opaqueReads.Load() != 0) {
+		t.Fatalf("metadata capture downloaded application payloads or misreported mode: mode=%t reads=%d", captured.MetadataOnly, opaqueReads.Load())
+	}
+	if captured.Published || (metadataOnly && captured.LayoutPath != "") || (!metadataOnly && captured.LayoutPath != original) || captured.Descriptor.Digest != dry.Descriptor.Digest {
 		t.Fatal("local capture changed digest or registry publication semantics")
 	}
 	if sourceWrites.Load() != 0 || sourceReads.Load() == 0 {
 		t.Fatalf("source access: %d writes, %d reads", sourceWrites.Load(), sourceReads.Load())
 	}
-	before := decode[[]bale.InspectResult](t, run(command, "inspect captured local bundle", "inspect", "--layout", original))
+	before := decode[[]bale.InspectResult](t, run(command, "inspect captured local bundle", inspectArgs...))
 	if len(before) != 1 || len(before[0].Metadata.Plugins) != 1 {
 		t.Fatal("local capture omitted plugin provenance")
 	}
 	archive := filepath.Join(dir, "release.tar")
+	if metadataOnly {
+		reads := sourceReads.Load()
+		plan := decode[bale.DeliveryPlan](t, run(command, "offline metadata delivery preview", "push", original, destination.host+"/direct:bundle", "--dry-run", "--format", "json"))
+		if !plan.MetadataOnly || sourceReads.Load() != reads {
+			t.Fatal("metadata preview read source or lost source dependence")
+		}
+		// A producer advances a mutable dependency tag after capture. Delivery and
+		// archive materialization must continue using the captured digest.
+		readOnly.Store(false)
+		if kind == "distribution" {
+			forbidOpaqueReads.Store(true)
+			mounted := decode[bale.PushResult](t, run(command, "same-registry metadata mount", "push", original, sourceHost+"/mounted:bundle", "--format", "json"))
+			forbidOpaqueReads.Store(false)
+			if mounted.Descriptor.Digest != captured.Descriptor.Digest || mounted.Stats.BlobsMounted == 0 || mounted.Stats.BlobBytesDownloaded != 0 || opaqueReads.Load() != 0 {
+				t.Fatalf("same-registry capture failed to mount without payload reads: %+v, opaque GETs=%d", mounted.Stats, opaqueReads.Load())
+			}
+		}
+		seed(t, ctx, client, sourceHost, "offline-runtime", "runtime-v2", true)
+		readOnly.Store(true)
+		direct := decode[bale.PushResult](t, run(command, "direct pinned metadata delivery", "push", original, destination.host+"/direct:bundle", "--format", "json"))
+		if direct.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("direct metadata delivery refreshed its snapshot")
+		}
+		saved := decode[bale.ArchiveResult](t, run(command, "materialize metadata archive", "save", original, "-o", archive, "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest || opaqueReads.Load() == 0 {
+			t.Fatal("archive materialization lost identity or did not fetch omitted payloads")
+		}
+	}
 	setPhase("stop original source")
 	source.stop(t)
 	trace.Lock()
@@ -216,20 +274,34 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	offline.hosts = nil
 	offline.env = append(append([]string{}, command.env...), "PATH="+helperDir)
 	readsBefore := sourceReads.Load()
-	saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", original, "-o", archive, "--format", "json"))
-	if saved.Descriptor.Digest != captured.Descriptor.Digest {
-		t.Fatal("save changed bundle digest")
+	if !metadataOnly {
+		saved := decode[bale.ArchiveResult](t, run(offline, "save offline archive", "save", "--layout", original, "-o", archive, "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("save changed bundle digest")
+		}
+	} else {
+		inspected := decode[[]bale.InspectResult](t, run(offline, "hydrated managed inspection after source shutdown", "inspect", original))
+		if len(inspected) != 1 || inspected[0].MetadataOnly {
+			t.Fatal("managed save did not retain complete offline content")
+		}
+		saved := decode[bale.ArchiveResult](t, run(offline, "resave hydrated managed bundle offline", "save", original, "-o", filepath.Join(dir, "hydrated.tar"), "--format", "json"))
+		if saved.Descriptor.Digest != captured.Descriptor.Digest {
+			t.Fatal("offline managed save changed bundle identity")
+		}
 	}
 	assertArchiveDeduplicated(t, archive)
-	if err := os.RemoveAll(original); err != nil {
+	if metadataOnly {
+		run(offline, "remove managed capture", "rm", original)
+	} else if err := os.RemoveAll(original); err != nil {
 		t.Fatal(err)
 	}
 	restoredPath := filepath.Join(dir, "restored")
-	loaded := decode[bale.ArchiveResult](t, run(offline, "load removable-media archive", "load", "-i", archive, restoredPath, "--format", "json"))
+	loaded := decode[bale.ArchiveResult](t, run(offline, "load removable-media archive", "load", "--layout", "-i", archive, restoredPath, "--format", "json"))
 	if loaded.Descriptor.Digest != captured.Descriptor.Digest || loaded.LayoutPath != restoredPath || loaded.ArchivePath != archive {
 		t.Fatal("load did not retain archive identity")
 	}
 	after := decode[[]bale.InspectResult](t, run(offline, "inspect restored bundle", "inspect", "--layout", restoredPath))
+	before[0].MetadataOnly = false // The restored archive is complete, with unchanged inventory.
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("archive roundtrip changed verified inventory")
 	}
@@ -260,7 +332,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	}
 	writeFile(t, deliveryPath, raw)
 	completion := destination.host + "/offline-release:bundle"
-	plan := decode[bale.DeliveryPlan](t, run(offline, "preview restored delivery", "push", restoredPath, completion, "--delivery", deliveryPath, "--dry-run", "--format", "json"))
+	plan := decode[bale.DeliveryPlan](t, run(offline, "preview restored delivery", "push", "--layout", restoredPath, completion, "--delivery", deliveryPath, "--dry-run", "--format", "json"))
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatal("offline operation invoked credential helper")
 	}
@@ -271,7 +343,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 	if err := os.Remove(filepath.Join(dockerConfig, "config.json")); err != nil {
 		t.Fatal(err)
 	}
-	result := decode[bale.PushResult](t, run(command, "deliver restored bundle", "push", restoredPath, completion, "--delivery", deliveryPath, "--format", "json"))
+	result := decode[bale.PushResult](t, run(command, "deliver restored bundle", "push", "--layout", restoredPath, completion, "--delivery", deliveryPath, "--format", "json"))
 	if result.Descriptor.Digest != captured.Descriptor.Digest || len(result.Destinations) == 0 {
 		t.Fatal("restored delivery changed bundle or omitted records")
 	}
@@ -314,7 +386,7 @@ func runOfflineCycle(t *testing.T, ctx context.Context, binary, kind, backend st
 		t.Fatal("destination-only discovery omitted dependency record")
 	}
 	finalPath := filepath.Join(dir, "destination-only")
-	run(command, "fresh destination-only pull", "pull", completion, finalPath)
+	run(command, "fresh destination-only pull", "pull", "--layout", completion, finalPath)
 	final := decode[[]bale.InspectResult](t, run(command, "verify destination-only bundle", "inspect", "--layout", finalPath))
 	if len(final) != 1 {
 		t.Fatalf("destination-only inspection returned %d bundles, want 1", len(final))

@@ -20,17 +20,17 @@ func TestCLI(t *testing.T) {
 		{"version", []string{"--version"}, 0, "bale dev"},
 		{"unsupported", []string{"bundle"}, 125, "unsupported command"},
 		{"extra arguments", []string{"--version", "extra"}, 125, "unsupported command"},
-		{"command help", []string{"pull", "--help"}, 0, "locked|latest"},
+		{"command help", []string{"pull", "--layout", "--help"}, 0, "locked|latest"},
 		{"missing operands", []string{"pull"}, 125, "invalid arguments"},
-		{"unknown flag", []string{"pull", "--other"}, 125, "unknown option"},
-		{"duplicate flag", []string{"pull", "--mode", "locked", "--mode", "latest"}, 125, "duplicate option"},
+		{"unknown flag", []string{"pull", "--layout", "--other"}, 125, "unknown option"},
+		{"duplicate flag", []string{"pull", "--layout", "--mode", "locked", "--mode", "latest"}, 125, "duplicate option"},
 		{"missing flag value", []string{"create", "--file"}, 125, "requires a value"},
-		{"bad mode after operands", []string{"pull", "example.com/b:tag", "layout", "--mode", "newest"}, 125, "--mode must"},
-		{"implicit registry", []string{"pull", "team/b:tag", "layout"}, 125, "explicit registry"},
-		{"implicit tag", []string{"pull", "example.com/b", "layout"}, 125, "explicit tag"},
-		{"bad HTTP scope", []string{"pull", "example.com/b:tag", "layout", "--plain-http", "http://example.com"}, 125, "invalid registry"},
-		{"bad mapping", []string{"push", "layout", "example.com/b:tag", "--map", "oops"}, 125, "--map requires"},
-		{"missing recipe", []string{"create", "--file", "/no/such/bale-test-file", "example.com/b:tag"}, 125, "no such file"},
+		{"bad mode after operands", []string{"pull", "--layout", "example.com/b:tag", "layout", "--mode", "newest"}, 125, "--mode must"},
+		{"implicit registry", []string{"pull", "--layout", "team/b:tag", "layout"}, 125, "explicit registry"},
+		{"implicit tag", []string{"pull", "--layout", "example.com/b", "layout"}, 125, "explicit tag"},
+		{"bad HTTP scope", []string{"pull", "--layout", "example.com/b:tag", "layout", "--plain-http", "http://example.com"}, 125, "invalid registry"},
+		{"bad mapping", []string{"push", "--layout", "layout", "example.com/b:tag", "--map", "oops"}, 125, "--map requires"},
+		{"missing recipe", []string{"create", "--registry", "--file", "/no/such/bale-test-file", "example.com/b:tag"}, 125, "no such file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errs bytes.Buffer
@@ -67,6 +67,33 @@ func TestFlagsAfterOperands(t *testing.T) {
 	opts, err = parseCommand("create", []string{"--dry-run", "example.com/b:tag", "--file", "recipe.yaml"})
 	if err != nil || !opts.dryRun || opts.file != "recipe.yaml" || len(opts.args) != 1 {
 		t.Fatalf("unexpected parse: %+v %v", opts, err)
+	}
+}
+
+func TestCreateOutputModes(t *testing.T) {
+	for _, tc := range []struct {
+		flags            []string
+		layout, registry bool
+	}{
+		{},
+		{flags: []string{"--layout"}, layout: true},
+		{flags: []string{"--registry"}, registry: true},
+		{flags: []string{"--layout=false", "--registry"}, registry: true},
+		{flags: []string{"--registry=false", "--layout"}, layout: true},
+	} {
+		opts, err := parseCommand("create", append(tc.flags, "-f", "bale.yaml", "output"))
+		if err != nil || opts.layout != tc.layout || opts.registry != tc.registry {
+			t.Fatalf("%v: %+v %v", tc.flags, opts, err)
+		}
+	}
+	var out, errs bytes.Buffer
+	if code := run([]string{"create", "--layout", "--registry", "-f", "missing", "output"}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "cannot be combined") {
+		t.Fatalf("conflicting output modes: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
+	for _, expected := range []string{"managed local store", "--registry", "--layout", "bale create -f bale.yaml -t release:v1"} {
+		if !strings.Contains(commandHelp("create"), expected) {
+			t.Errorf("create help missing %q", expected)
+		}
 	}
 }
 
@@ -127,7 +154,7 @@ func TestFlagAliasesAndDelimiter(t *testing.T) {
 	for _, args := range [][]string{
 		{"create", "-f", "one", "--file=two"},
 		{"inspect", "-fjson", "--format=json"},
-		{"pull", "-q", "--quiet"},
+		{"pull", "--layout", "-q", "--quiet"},
 		{"inspect", "-h", "--help"},
 	} {
 		var out, errs bytes.Buffer

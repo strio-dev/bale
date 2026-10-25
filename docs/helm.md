@@ -49,13 +49,13 @@ helm plugin install result-helm-consumer-archive/bale-0.0.0.tgz --verify=false
 Choose the package matching the receiving machine. Helm does not select native plugins from a multiarchitecture index. Keep the final repository name `bale` when publishing and delivering it.
 
 ```sh
-bale create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
+bale create -f bale.yaml -t release:v1 --output-delivery bale.delivery.yaml
 ```
 
-In the generated delivery file, set the chart's path to `charts/web` and the native plugin's path to `plugins/bale`. Review the remaining [delivery paths](transfers.md#export-delivery-paths), then push:
+Creation reads the chart and discovery plugin, locks the image digests under `release:v1` in the local store and keeps ordinary image payloads at their source locations until push or save. In the generated delivery file, set the chart's path to `charts/web` and the native plugin's path to `plugins/bale`. Review the remaining [delivery paths](transfers.md#export-delivery-paths), then push:
 
 ```sh
-bale push ./release mirror.example.com/release:bundle --delivery bale.delivery.yaml
+bale push release:v1 mirror.example.com/release:bundle --delivery bale.delivery.yaml
 ```
 
 On the receiving machine, install into a Helm environment without an existing `bale` plugin:

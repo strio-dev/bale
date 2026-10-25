@@ -27,13 +27,15 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 	if err != nil {
 		return DeliveryPlan{}, operationError("destination", destination, v1.Descriptor{}, ErrInvalid, err)
 	}
-	store, snapshot, err := openLayout(ctx, layoutPath)
+	store, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
-	plan := DeliveryPlan{LayoutPath: layoutPath, Destination: destination, Descriptor: snapshot.Descriptor, Repositories: []DeliveryRepository{}, Tags: []Tag{}}
-	if _, err := bundle.LoadSnapshotGraph(ctx, store, snapshot.Descriptor); err != nil {
-		return DeliveryPlan{}, err
+	plan := DeliveryPlan{MetadataOnly: capture != nil, captureDigest: captureDigest, LayoutPath: layoutPath, Destination: destination, Descriptor: snapshot.Descriptor, Repositories: []DeliveryRepository{}, Tags: []Tag{}}
+	if capture == nil {
+		if _, err := bundle.LoadSnapshotGraph(ctx, store, snapshot.Descriptor); err != nil {
+			return DeliveryPlan{}, err
+		}
 	}
 	snapshots, err := collectBundleSnapshots(ctx, store, snapshot.Descriptor, bundle.InspectSnapshot)
 	metadata := make([]bundle.Metadata, len(snapshots))
@@ -321,7 +323,7 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 }
 func planSeal(p DeliveryPlan) string {
 	raw, _ := json.Marshal(p)
-	return digest.FromBytes(raw).String()
+	return digest.FromBytes(append(raw, []byte(p.captureDigest)...)).String()
 }
 
 func collectBundleMetadata(ctx context.Context, store content.ReadOnlyStorage, root v1.Descriptor, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) ([]bundle.Metadata, error) {
@@ -391,9 +393,17 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 	if plan.seal == "" || plan.seal != planSeal(plan) {
 		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrInvalid, fmt.Errorf("delivery plan changed; generate a new plan"))
 	}
-	store, snapshot, err := openLayout(ctx, plan.LayoutPath)
+	store, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, plan.LayoutPath)
 	if err != nil {
 		return result, err
+	}
+	if captureDigest != plan.captureDigest || (capture != nil) != plan.MetadataOnly {
+		return result, operationError("plan", plan.LayoutPath, plan.Descriptor, ErrIntegrity, fmt.Errorf("local capture sources changed since planning"))
+	}
+	var mountSource map[digest.Digest]string
+	if capture != nil {
+		mountSource = capture.Sources
+		store = captureSource{local: store, service: s, sources: capture.Sources, stats: &result.Stats}
 	}
 	if snapshot.Descriptor.Digest != plan.Descriptor.Digest {
 		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrIntegrity, fmt.Errorf("layout root changed since planning"))
@@ -429,7 +439,7 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 			return result, err
 		}
 		for _, root := range entry.Roots {
-			if err := copyGraph(ctx, store, repo, root, &result.Stats, nil); err != nil {
+			if err := copyGraph(ctx, store, repo, root, &result.Stats, mountSource); err != nil {
 				return result, err
 			}
 			if err := verifyRemoteClosure(ctx, repo, root); err != nil {
@@ -471,7 +481,7 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 	if err != nil {
 		return result, err
 	}
-	if err := copyGraph(ctx, store, repo, plan.Descriptor, &result.Stats, nil); err != nil {
+	if err := copyGraph(ctx, store, repo, plan.Descriptor, &result.Stats, mountSource); err != nil {
 		return result, err
 	}
 	if err := verifyRemoteClosure(ctx, repo, plan.Descriptor); err != nil {

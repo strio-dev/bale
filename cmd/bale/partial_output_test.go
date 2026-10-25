@@ -65,11 +65,11 @@ func TestTransferPartialJSON(t *testing.T) {
 		var args []string
 		switch command {
 		case "create":
-			args = []string{command, "-f", recipe, host + "/destination:bundle"}
+			args = []string{command, "--registry", "-f", recipe, host + "/destination:bundle"}
 		case "pull":
-			args = []string{command, host + "/bundles:release", filepath.Join(t.TempDir(), "pulled")}
+			args = []string{command, "--layout", host + "/bundles:release", filepath.Join(t.TempDir(), "pulled")}
 		case "push":
-			args = []string{command, dir, host + "/destination:bundle"}
+			args = []string{command, "--layout", dir, host + "/destination:bundle"}
 		}
 		return append(args, "--plain-http", host, "--quiet")
 	}
@@ -132,8 +132,8 @@ func TestTransferPartialJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, args := range [][]string{
-			{"create", "-f", missingRecipe, host + "/destination:bundle"},
-			{"pull", host + "/bundles:missing", filepath.Join(t.TempDir(), "pulled")},
+			{"create", "--registry", "-f", missingRecipe, host + "/destination:bundle"},
+			{"pull", "--layout", host + "/bundles:missing", filepath.Join(t.TempDir(), "pulled")},
 		} {
 			var out, errs bytes.Buffer
 			args = append(args, "--plain-http", host, "--quiet", "--format", "json")
@@ -167,7 +167,7 @@ func TestTransferPartialJSON(t *testing.T) {
 		for _, format := range []string{"json", "", "{{.Descriptor.Digest}}"} {
 			var out bytes.Buffer
 			errs := &partialProgressFailWriter{}
-			args := []string{"pull", host + "/bundles:release", filepath.Join(t.TempDir(), "pulled"), "--plain-http", host}
+			args := []string{"pull", "--layout", host + "/bundles:release", filepath.Join(t.TempDir(), "pulled"), "--plain-http", host}
 			if format != "" {
 				args = append(args, "--format", format)
 			}
@@ -193,11 +193,11 @@ func TestTransferJSONWithoutResultStaysEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
-		{"push", "missing-layout", "example.invalid/bundle:v1"},
-		{"push", "missing-layout", "example.invalid/bundle:v1", "--dry-run"},
-		{"create", "-f", recipe, "example.invalid/bundle:v1"},
-		{"create", "-f", "missing-recipe", "example.invalid/bundle:v1"},
-		{"pull", "example.invalid/bundle", "unused"},
+		{"push", "--layout", "missing-layout", "example.invalid/bundle:v1"},
+		{"push", "--layout", "missing-layout", "example.invalid/bundle:v1", "--dry-run"},
+		{"create", "--registry", "-f", recipe, "example.invalid/bundle:v1"},
+		{"create", "--registry", "-f", "missing-recipe", "example.invalid/bundle:v1"},
+		{"pull", "--layout", "example.invalid/bundle", "unused"},
 	} {
 		var out, errs bytes.Buffer
 		args = append(args, "--format", "json", "--quiet")

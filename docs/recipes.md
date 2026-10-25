@@ -26,7 +26,7 @@ include:
 | `dependencies` | Declaration-following policy; defaults to `follow: auto`. |
 | `plugin` | Optional OCI discovery plugin and its input. |
 
-Creation pins selected digests and preserves complete multiarchitecture graphs. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Recipes contain exactly one YAML document. Unknown and duplicate fields, aliases, anchors and YAML merge keys are rejected. Outside `plugin.input`, scalar values must be nonempty strings without surrounding whitespace; quote numeric-looking tags as shown above.
+Creation pins the complete graph, including multiarchitecture images. Default creation retains metadata in the managed local store; `save` or `push` reads missing payloads from those pinned sources. Sources need an explicit registry host: Bale does not assume Docker Hub or a `latest` tag. Recipes contain exactly one YAML document. Unknown and duplicate fields, aliases, anchors and YAML merge keys are rejected. Outside `plugin.input`, scalar values must be nonempty strings without surrounding whitespace; quote numeric-looking tags as shown above.
 
 ## Discover dependencies with a plugin
 
@@ -44,7 +44,7 @@ include:
           mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
 ```
 
-`plugin.ref` selects a plugin from your registry by tag or digest. These example coordinates are placeholders; publish the plugin before using them. Creation runs it automatically, then captures its graph, generated declaration and discovered dependencies without attaching metadata to the source artifact.
+`plugin.ref` selects a plugin from your registry by tag or digest. These example coordinates are placeholders; publish the plugin before using them. Creation runs it automatically, then locks its graph, generated declaration and discovered dependencies without attaching metadata to the source artifact.
 
 `input` is a literal JSON object, defaults to `{}`, and accepts nested JSON values. File paths have no special meaning. Each `blobs` entry fills a top-level input field with verified, base64-encoded bytes from exactly one artifact layer matching `mediaType`. A bound field cannot also appear in `input`.
 

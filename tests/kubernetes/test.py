@@ -141,7 +141,7 @@ def fixture(action, arguments=""):
 def cli(arguments, label):
     """Keep public CLI JSON separate from its progress and error evidence."""
     report = ROOT + "/evidence/" + label + ".json"
-    command = ("SSL_CERT_FILE=" + REGISTRY_CA + " DOCKER_CONFIG=" + ROOT
+    command = ("XDG_DATA_HOME=" + ROOT + "/data SSL_CERT_FILE=" + REGISTRY_CA + " DOCKER_CONFIG=" + ROOT
                + "/docker " + quote(config["bale"]) + " " + arguments)
     write(ROOT + "/evidence/" + label + ".command", command + "\n")
     machine.succeed(command + " >" + report + " 2>" + ROOT + "/evidence/" + label + ".log", timeout=300)
@@ -197,7 +197,7 @@ def capture(name, recipe, repositories, expected_plugin=True, source_hosts=()):
         assert not created["metadata"].get("plugins"), created
     edit_delivery(created, delivery_path, repositories)
     run("cp " + recipe_path + " " + delivery_path + " " + delivery_path + ".generated " + ROOT + "/evidence/")
-    saved = cli("save " + layout + " -o " + ROOT + "/" + name + ".tar --format json", "cli-save-" + name)
+    saved = cli("save --layout " + layout + " -o " + ROOT + "/" + name + ".tar --format json", "cli-save-" + name)
     assert saved["descriptor"]["digest"] == created["descriptor"]["digest"], saved
     run("rm -rf -- " + layout)
     return created
@@ -205,11 +205,11 @@ def capture(name, recipe, repositories, expected_plugin=True, source_hosts=()):
 
 def deliver(name, created, destination):
     layout = ROOT + "/restored-" + name
-    loaded = cli("load -i " + ROOT + "/" + name + ".tar " + layout + " --format json", "cli-load-" + name)
+    loaded = cli("load --layout -i " + ROOT + "/" + name + ".tar " + layout + " --format json", "cli-load-" + name)
     assert loaded["descriptor"]["digest"] == created["descriptor"]["digest"], loaded
     inspected = cli("inspect --layout " + layout + " --format json", "cli-inspect-" + name)
     assert inspected[0]["metadata"] == created["metadata"], inspected
-    pushed = cli("push " + layout + " " + destination + " --delivery " + ROOT + "/" + name
+    pushed = cli("push --layout " + layout + " " + destination + " --delivery " + ROOT + "/" + name
                  + ".delivery.yaml --format json", "cli-push-" + name)
     assert pushed["descriptor"]["digest"] == created["descriptor"]["digest"], pushed
     assert pushed["destinations"], pushed

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -14,18 +13,19 @@ import (
 	"github.com/strio-dev/bale"
 )
 
-const deliveryHelp = `Update publication paths across captured bundle snapshots
+const deliveryHelp = `Export and update publication paths for captured bundles
 
 Usage:
   bale delivery [command]
 
 Available Commands:
+  export      Export captured delivery paths as YAML
   update      Carry delivery paths onto a refreshed bundle
 
 Options:
   -h, --help  Help for delivery
 
-Use "bale delivery update --help" for more information.`
+Use "bale delivery [command] --help" for more information.`
 
 const deliveryUpdateHelp = `Carry explicit paths from an old delivery file onto a refreshed bundle
 
@@ -33,16 +33,19 @@ Usage:
   bale delivery update [options] BEFORE AFTER
 
 Options:
-  -f, --file FILE         Existing delivery YAML bound to BEFORE (required)
+  -f, --file FILE         Existing delivery YAML bound to BEFORE; - reads stdin (required)
   -o, --output FILE       New delivery YAML; must not exist (required)
-      --layout            Interpret both operands as local OCI layout directories
+      --store PATH        Override the managed local store
+      --registry          Interpret both operands as registry references
+      --layout            Interpret both operands as explicit OCI layout directories
       --format FORMAT     Output JSON or a Go template (default: readable report)
+      --authfile FILE     Registry authentication file
       --plain-http HOST   Permit HTTP for this exact registry host (repeatable)
   -h, --help              Help for delivery update
 
 Examples:
-  bale delivery update --layout ./locked ./refreshed -f bale.delivery.yaml -o refreshed.delivery.yaml
-  bale delivery update registry.example.com/bundles:v1 registry.example.com/bundles:v2 -f old.yaml -o new.yaml
+  bale delivery update release:v1 release:v2 -f bale.delivery.yaml -o refreshed.delivery.yaml
+  bale delivery update --registry registry.example.com/bundles:v1 registry.example.com/bundles:v2 -f old.yaml -o new.yaml
 
 Preserves exact identities and follows one-to-one captured selector changes.
 New artifacts receive defaults; removals and ambiguous paths are reported.
@@ -56,6 +59,9 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 			return fail(errOut, err)
 		}
 		return 0
+	}
+	if args[1] == "export" {
+		return runDeliveryExport(ctx, args, out, errOut)
 	}
 	if args[1] != "update" {
 		return fail(errOut, fmt.Errorf("unsupported command; see bale delivery --help"))
@@ -76,7 +82,7 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if err := validateHTTP(opts.plainHTTP); err != nil {
 		return fail(errOut, err)
 	}
-	if !opts.layout {
+	if opts.registry {
 		for _, ref := range opts.args {
 			if err := explicitReference(ref, false); err != nil {
 				return fail(errOut, fmt.Errorf("%q: %w", ref, err))
@@ -87,7 +93,7 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 	if err != nil {
 		return fail(errOut, err)
 	}
-	data, err := os.ReadFile(opts.file)
+	data, err := readInputFile(opts.file)
 	if err != nil {
 		return fail(errOut, err)
 	}
@@ -100,15 +106,23 @@ func runDelivery(ctx context.Context, args []string, out, errOut io.Writer) int 
 		return fail(errOut, err)
 	}
 	defer output.close()
-	client, err := newCLIClient(opts, nil)
-	if err != nil {
-		return fail(errOut, err)
-	}
 	var result bale.DeliveryUpdateResult
-	if opts.layout {
-		result, err = client.UpdateDeliveryLayouts(ctx, opts.args[0], opts.args[1], file)
+	if !opts.layout && !opts.registry {
+		local, openErr := openManaged(ctx, opts, nil)
+		if openErr != nil {
+			return fail(errOut, openErr)
+		}
+		result, err = local.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
 	} else {
-		result, err = client.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
+		client, openErr := newCLIClient(opts, nil)
+		if openErr != nil {
+			return fail(errOut, openErr)
+		}
+		if opts.layout {
+			result, err = client.UpdateDeliveryLayouts(ctx, opts.args[0], opts.args[1], file)
+		} else {
+			result, err = client.UpdateDelivery(ctx, opts.args[0], opts.args[1], file)
+		}
 	}
 	if err != nil && !errors.Is(err, bale.ErrConflict) {
 		return fail(errOut, err)

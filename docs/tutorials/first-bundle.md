@@ -20,43 +20,44 @@ include:
   - docker.io/library/busybox:1.37
 ```
 
-Bale resolves the tag to a digest and includes its platform images.
+Bale resolves the tag and its platform images to digests without downloading their image layers.
 
 ## Capture and inspect
 
 ```sh
-bale create --layout -f bale.yaml ./release \
+bale create -f bale.yaml -t release:v1 \
   --output-delivery bale.delivery.yaml
-bale inspect --layout ./release -f '{{.Descriptor.Digest}}'
+bale ls
+bale inspect release:v1 -f '{{.Descriptor.Digest}}'
 ```
 
-Both commands print the same bundle digest. `release/` contains the captured content; `bale.delivery.yaml` lists its publication paths.
+Create and inspect print the same bundle digest. `release:v1` names it in Bale's local store; `bale.delivery.yaml` lists publication paths. Keep access to Docker Hub until saving or pushing the bundle.
 
 View the full JSON inventory with:
 
 ```sh
-bale inspect --layout ./release
+bale inspect release:v1
 ```
 
-The [inspection guide](../inspection.md) explains the report and formatting options.
+The report shows `metadataOnly: true` while payloads are missing from the store. The [inspection guide](../inspection.md) explains its validation and formatting options.
 
 ## Save and restore
 
 ```sh
-bale save ./release -o release.tar
-bale load -i release.tar ./restored
-bale inspect --layout ./restored -f '{{.Descriptor.Digest}}'
-bale diff --layout ./release ./restored
+bale save release:v1 -o release.tar
+bale load -i release.tar -t restored:v1
+bale inspect restored:v1 -f '{{.Descriptor.Digest}}'
+bale diff release:v1 restored:v1
 ```
 
-The restored digest matches the original, and diff reports `Bundle changed: false`. Save and load work offline and store shared content once by digest. Carry `release.tar` to another machine and restore it there the same way.
+Save downloads the pinned payloads into the shared local store and writes a complete archive. Load works offline and adds the `restored:v1` name. The restored digest matches the original, and diff reports `Bundle changed: false`. Shared content is stored once by digest. Carry `release.tar` to another machine and restore it there the same way.
 
-Output paths must not already exist; an empty directory is rejected too. Use a new working directory when repeating the tutorial.
+The archive and delivery output files must not already exist. Bundle names refer to retained IDs in the local store; no bundle output directory is needed.
 
 ## Preview delivery
 
 ```sh
-bale push ./restored mirror.example.com/releases/first:bundle \
+bale push restored:v1 mirror.example.com/releases/first:bundle \
   --delivery bale.delivery.yaml --dry-run
 ```
 
@@ -67,7 +68,7 @@ The placeholder destination needs no credentials for this preview. Edit `path` v
 Replace the destination with a writable registry and configure [credentials](../registry.md#authentication-and-transport):
 
 ```sh
-bale push ./restored mirror.example.com/releases/first:bundle \
+bale push restored:v1 mirror.example.com/releases/first:bundle \
   --delivery bale.delivery.yaml
 ```
 

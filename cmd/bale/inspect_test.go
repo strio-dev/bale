@@ -248,13 +248,13 @@ func TestInspectAndPullRemoteReadOnlyCapturedContent(t *testing.T) {
 	host := strings.TrimPrefix(server.URL, "http://")
 	reference := host + "/bundles:release"
 	var out, errs bytes.Buffer
-	if code := run([]string{"inspect", reference, "--plain-http", host, "-f", "{{.Descriptor.Digest}}"}, &out, &errs); code != 0 || out.String() != root.Digest.String()+"\n" || errs.Len() != 0 {
+	if code := run([]string{"inspect", "--registry", reference, "--plain-http", host, "-f", "{{.Descriptor.Digest}}"}, &out, &errs); code != 0 || out.String() != root.Digest.String()+"\n" || errs.Len() != 0 {
 		t.Fatalf("remote inspect exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	output := filepath.Join(t.TempDir(), "delivery.yaml")
 	out.Reset()
 	errs.Reset()
-	if code := run([]string{"inspect", reference, "--plain-http", host, "--output-delivery", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
+	if code := run([]string{"delivery", "export", "--registry", reference, "--plain-http", host, "-o", output}, &out, &errs); code != 0 || out.Len() != 0 || errs.Len() != 0 {
 		t.Fatalf("remote export exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 	raw, err := os.ReadFile(output)
@@ -275,7 +275,7 @@ func TestInspectAndPullRemoteReadOnlyCapturedContent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out.Reset()
 			errs.Reset()
-			args := append([]string{"pull", reference, filepath.Join(t.TempDir(), "pulled"), "--plain-http", host}, tc.flags...)
+			args := append([]string{"pull", "--layout", reference, filepath.Join(t.TempDir(), "pulled"), "--plain-http", host}, tc.flags...)
 			if code := run(args, &out, &errs); code != 0 {
 				t.Fatalf("pull exit %d stdout %s stderr %s", code, &out, &errs)
 			}

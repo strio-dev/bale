@@ -4,24 +4,24 @@ Carry your path edits onto a refreshed bundle. Keep both snapshots: the old bund
 
 ## Update a file
 
-With [locked and refreshed layouts](transfers.md#locked-and-latest-pulls):
+With [locked and refreshed bundles](transfers.md#locked-and-latest-pulls):
 
 ```sh
-bale delivery update --layout ./locked ./refreshed \
+bale delivery update release:locked release:refreshed \
   -f bale.delivery.yaml -o refreshed.delivery.yaml
-bale push ./refreshed mirror.example.com/releases/v1:bundle \
+bale push release:refreshed mirror.example.com/releases/v1:bundle \
   --delivery refreshed.delivery.yaml --dry-run
 ```
 
 You can also use registry references:
 
 ```sh
-bale delivery update registry.example.com/bundles/release:v1 \
+bale delivery update --registry registry.example.com/bundles/release:v1 \
   registry.example.com/bundles/release:v2 \
   -f old.delivery.yaml -o new.delivery.yaml
 ```
 
-`--file/-f` selects the old delivery YAML; `--output/-o` requires a new file. Use `--layout` for local inputs.
+`--file/-f` selects the old delivery YAML; `--output/-o` requires a new file. Inputs default to names or IDs in the local store. Use `--registry` for remote references or `--layout` for standalone OCI directories.
 
 ## Matching paths
 
@@ -42,8 +42,8 @@ If old path choices disagree or a selector matches several artifacts, Bale repor
 The readable report labels paths `preserved`, `moved`, `defaulted` or `removed`. Request JSON for automation:
 
 ```sh
-bale delivery update --layout ./locked ./refreshed \
+bale delivery update release:locked release:refreshed \
   -f bale.delivery.yaml -o refreshed.report.delivery.yaml --format json
 ```
 
-Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate the full graph. [Report fields and exit status](reference/cli.md#update-reports) are listed in the reference.
+Update reads captured metadata and leaves both bundles unchanged. It does not refresh tags, run plugins or check payloads. [Preview the push](transfers.md#push-to-a-destination) to validate paths and local content. Metadata captures still need their pinned sources during delivery. [Report fields and exit status](reference/cli.md#update-reports) are listed in the reference.

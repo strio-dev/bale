@@ -12,38 +12,43 @@ Replace `latest` with a published release tag to pin a version. Stable releases 
 
 ## Capture a bundle
 
-Save the [first-bundle recipe](../tutorials/first-bundle.md#write-a-recipe) as `bale.yaml`, then mount its working directory:
+Save the [first-bundle recipe](../tutorials/first-bundle.md#write-a-recipe) as `bale.yaml`. Mount the workspace and a persistent local store:
 
 ```sh
+bale_data="${XDG_DATA_HOME:-$HOME/.local/share}/bale"
+mkdir -p "$bale_data"
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work:Z" -v bale-cache:/cache \
+  -v "$PWD:/work:Z" -v "$bale_data:/data/bale:Z" -v bale-cache:/cache \
+  -e XDG_DATA_HOME=/data \
   ghcr.io/strio-dev/bale:latest \
-  create --layout -f bale.yaml ./release --output-delivery bale.delivery.yaml
+  create -f bale.yaml -t release:v1 --output-delivery bale.delivery.yaml
 ```
 
-The mounts have two purposes:
+- `$PWD:/work:Z` holds recipes, delivery files and archive outputs. Outputs have your host ownership; `:Z` supplies an SELinux label.
+- The data mount retains bundle IDs, local names and shared blobs between containers. It uses the same host store as the native CLI.
+- `bale-cache:/cache` retains compiled discovery plugins. This mount is optional; keep it private to one effective user.
 
-- `$PWD:/work:Z` makes the project writable inside the container. Outputs have your host ownership; `:Z` supplies an SELinux label.
-- `bale-cache:/cache` retains compiled discovery plugins between runs. This mount is optional; keep the cache private to one effective user.
-
-Bale needs no privileged mode, container socket or nested runtime. Plugins run inside Bale.
+Creation locks metadata in the store; save or push reads missing content from the pinned sources. Bale needs no privileged mode, container socket or nested runtime. Plugins run inside Bale.
 
 ## Save, restore and deliver
 
-Use the same workspace mount:
+Keep the workspace, store mount and data-home setting on each invocation:
 
 ```sh
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
-  ghcr.io/strio-dev/bale:latest save ./release -o release.tar
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
-  ghcr.io/strio-dev/bale:latest load -i release.tar ./restored
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" -v "$PWD:/work:Z" \
+podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work:Z" -v "$bale_data:/data/bale:Z" -e XDG_DATA_HOME=/data \
+  ghcr.io/strio-dev/bale:latest save release:v1 -o release.tar
+podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work:Z" -v "$bale_data:/data/bale:Z" -e XDG_DATA_HOME=/data \
+  ghcr.io/strio-dev/bale:latest load -i release.tar -t restored:v1
+podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work:Z" -v "$bale_data:/data/bale:Z" -e XDG_DATA_HOME=/data \
   ghcr.io/strio-dev/bale:latest \
-  push ./restored mirror.example.com/release:bundle \
+  push restored:v1 mirror.example.com/release:bundle \
   --delivery bale.delivery.yaml --dry-run
 ```
 
-Use new output paths. Replace the destination, configure credentials below, then remove `--dry-run` to publish. See [offline packaging](../offline.md) to move the archive between machines.
+Keep source access available until save finishes. Use new archive and delivery file paths. Replace the destination, configure credentials below, then remove `--dry-run` to publish. See [offline packaging](../offline.md) to move the archive between machines.
 
 ## Registry credentials
 
@@ -51,17 +56,17 @@ Create a Docker-compatible credential directory with your registry login tool, t
 
 ```sh
 podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work:Z" -v "$HOME/.config/bale/registry-auth:/registry:ro,Z" \
-  -e DOCKER_CONFIG=/registry \
+  -v "$PWD:/work:Z" -v "$bale_data:/data/bale:Z" -e XDG_DATA_HOME=/data \
+  -v "$HOME/.config/bale/registry-auth:/registry:ro,Z" -e DOCKER_CONFIG=/registry \
   ghcr.io/strio-dev/bale:latest \
-  push ./restored mirror.example.com/release:bundle --delivery bale.delivery.yaml
+  push restored:v1 mirror.example.com/release:bundle --delivery bale.delivery.yaml
 ```
 
-The example expects `$HOME/.config/bale/registry-auth/config.json`. The image has no credential helpers, so the file must contain usable credentials. Keep it outside bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. See [registry access](../registry.md#authentication-and-transport).
+Use the same credential mount for creation or save when the source registries are private. The example expects `$HOME/.config/bale/registry-auth/config.json`. The image has no credential helpers, so the file must contain usable credentials. Keep it outside bundles and Git. For a private CA, mount its PEM file read-only and set `SSL_CERT_FILE` to that path. See [registry access](../registry.md#authentication-and-transport).
 
 ## Docker
 
-On Linux, replace `podman` with `docker` and omit `--userns=keep-id`. Keep `--user "$(id -u):$(id -g)"` for host-owned output. The image defaults to UID/GID `65532:65532` and supports arbitrary UIDs with writable `/tmp`, `/work` and `/cache`.
+On Linux, replace `podman` with `docker` and omit `--userns=keep-id`. Keep `--user "$(id -u):$(id -g)"` for host-owned output. The image defaults to UID/GID `65532:65532` and supports arbitrary UIDs with writable temporary, workspace, store and cache mounts.
 
 ## Build locally
 

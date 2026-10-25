@@ -129,7 +129,7 @@ func TestPushPreviewMatchesSDKWithoutNetworkOrCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := layoutBytes(t, dir)
-	args := []string{"push", dir, destination, "--dry-run", "--plain-http", host, "--delivery", deliveryPath, "--map", "unreachable.invalid/app=attachments", "--map", "other.invalid/app=vendor/app", "--format", "json"}
+	args := []string{"push", "--layout", dir, destination, "--dry-run", "--plain-http", host, "--delivery", deliveryPath, "--map", "unreachable.invalid/app=attachments", "--map", "other.invalid/app=vendor/app", "--format", "json"}
 	var out, errs bytes.Buffer
 	if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
 		t.Fatalf("exit %d stdout %s stderr %s", code, &out, &errs)
@@ -227,7 +227,7 @@ func TestPushPreviewLocalFailuresDoNotPublish(t *testing.T) {
 			}))
 			defer server.Close()
 			host := strings.TrimPrefix(server.URL, "http://")
-			args := []string{"push", dir, host + "/release:bundle", "--dry-run", "--plain-http", host}
+			args := []string{"push", "--layout", dir, host + "/release:bundle", "--dry-run", "--plain-http", host}
 			file := bale.DeliveryFile{Bundle: inspected.Descriptor.Digest, Artifacts: []bale.DeliveryArtifact{}}
 			switch name {
 			case "missing payload", "corrupt payload":
@@ -291,7 +291,7 @@ func TestPushWithoutPreviewStillChecksDestination(t *testing.T) {
 	host := strings.TrimPrefix(server.URL, "http://")
 	for _, flags := range [][]string{nil, {"--dry-run=false"}} {
 		requests.Store(0)
-		args := append([]string{"push", dir, host + "/release:bundle", "--plain-http", host}, flags...)
+		args := append([]string{"push", "--layout", dir, host + "/release:bundle", "--plain-http", host}, flags...)
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 125 || out.Len() != 0 || errs.Len() == 0 {
 			t.Fatalf("%v: exit %d stdout %s stderr %s", flags, code, &out, &errs)

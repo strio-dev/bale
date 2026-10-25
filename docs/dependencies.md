@@ -1,6 +1,6 @@
 # Dependency declarations
 
-A dependency declaration is an OCI attachment listing the additional artifacts its subject needs. Bale follows it when creating a bundle. The declaration carries references; the bundle captures their resolved content.
+A dependency declaration is an OCI attachment listing the additional artifacts its subject needs. Bale follows it when creating a bundle. The declaration carries references; the bundle locks their resolved digests.
 
 ## Author and attach a declaration
 
@@ -41,7 +41,7 @@ Use registry coordinates you control and have permission to write. Attach pins t
 | `list` | Verified declaration descriptors, without parsing payloads. Use `.Digest` to choose a declaration in a recipe. |
 | `inspect` | Validated declarations with `repository`, `subject`, `descriptor` and `declaration`, sorted by digest. It does not select or follow dependencies. |
 
-List and inspect default to JSON arrays (`[]` when empty). For authentication, HTTP scopes and output templates, see [CLI conventions](reference/cli.md).
+List and inspect default to JSON arrays (`[]` when empty); `ls` aliases `list`. Attach accepts `-f -` to read a declaration from stdin. For authentication, HTTP scopes and output templates, see [CLI conventions](reference/cli.md).
 
 ## Generate with a plugin
 
@@ -66,7 +66,7 @@ This attachment is not a bundle: publishing it stores metadata only. The [SDK](s
 
 ## Following and selecting declarations
 
-Creation automatically follows a single matching declaration, recursively capturing its dependencies, complete multiarchitecture graphs and selected referrers. Tags are resolved at creation, and the bundle records both original selectors and pinned digests. More than one matching declaration requires an explicit `dependencies.select` in the [recipe](recipes.md#control-dependency-following).
+Creation automatically follows a single matching declaration, recursively locking its dependencies, complete multiarchitecture graphs and selected referrers. Tags are resolved at creation, and the bundle records both original selectors and pinned digests. More than one matching declaration requires an explicit `dependencies.select` in the [recipe](recipes.md#control-dependency-following).
 
 The input's selection applies to that artifact. Each declaration entry can select its dependency's declaration independently. `follow: none` stops declaration expansion but retains mandatory OCI graph edges. Referrer inclusion remains separate: a selected declaration is retained even with `referrers.include: none`.
 

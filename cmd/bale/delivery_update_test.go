@@ -168,6 +168,30 @@ func TestDeliveryUpdateCLIFormatsAndReadOnlyInputs(t *testing.T) {
 	}
 }
 
+func TestDeliveryUpdateStdin(t *testing.T) {
+	before, _, _ := cliBundle(t)
+	after, root, _ := cliDeliveryRefresh(t, false)
+	input, _ := cliEditedDelivery(t, before)
+	raw, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withInput(t, string(raw))
+	output := filepath.Join(t.TempDir(), "updated.delivery.yaml")
+	var out, errs bytes.Buffer
+	args := []string{"delivery", "update", "--layout", before, after, "-f", "-", "-o", output}
+	if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
+		t.Fatalf("stdin update: exit %d stdout %s stderr %s", code, &out, &errs)
+	}
+	raw, err = os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file, err := bale.DecodeDeliveryFile(raw); err != nil || file.Bundle != root.Digest || len(file.Artifacts) != 1 || file.Artifacts[0].Path != "images/custom" {
+		t.Fatalf("updated delivery: %s: %v", raw, err)
+	}
+}
+
 func TestDeliveryUpdateConflictReportsWithoutFile(t *testing.T) {
 	before, _, _ := cliBundle(t)
 	after, _, _ := cliDeliveryRefresh(t, true)
@@ -292,8 +316,8 @@ func TestDeliveryUpdateOptionsAndHelp(t *testing.T) {
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "--file", "other", "-o", "out"}, "duplicate option"},
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "-o", "out", "--output", "other"}, "duplicate option"},
 		{[]string{"delivery", "update", "old", "new", "--layout", "-f", "file", "-o", "out", "--format", "{{"}, "invalid --format"},
-		{[]string{"delivery", "update", "team/b:tag", "example.invalid/b:tag", "-f", "file", "-o", "out"}, "explicit registry"},
-		{[]string{"delivery", "update", "example.invalid/b:tag", "example.invalid/b", "-f", "file", "-o", "out"}, "explicit tag"},
+		{[]string{"delivery", "update", "--registry", "team/b:tag", "example.invalid/b:tag", "-f", "file", "-o", "out"}, "explicit registry"},
+		{[]string{"delivery", "update", "--registry", "example.invalid/b:tag", "example.invalid/b", "-f", "file", "-o", "out"}, "explicit tag"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(tc.args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), tc.want) {

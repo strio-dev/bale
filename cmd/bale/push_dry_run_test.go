@@ -48,7 +48,7 @@ func TestPushDryRunFormats(t *testing.T) {
 		{name: "template", flags: []string{"--format", "{{.Descriptor.Digest}} {{.Destination}} {{len .Relocations}}"}, want: fmt.Sprintf("%s %s %d\n", root.Digest, destination, len(plan.Relocations))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := []string{"push", dir, destination}
+			args := []string{"push", "--layout", dir, destination}
 			if tc.name != "boolean" {
 				args = append(args, "--dry-run")
 			}
@@ -82,12 +82,12 @@ func TestPushDryRunOptionsAndHelp(t *testing.T) {
 	if err != nil || !opts.dryRun || !opts.quiet || opts.delivery != "delivery.yaml" || opts.format != "json" || len(opts.maps) != 1 || len(opts.args) != 2 {
 		t.Fatalf("unexpected options: %+v, %v", opts, err)
 	}
-	for _, args := range [][]string{{"push", "--help"}, {"help", "push"}} {
+	for _, args := range [][]string{{"push", "--layout", "--help"}, {"help", "push"}} {
 		var out, errs bytes.Buffer
 		if code := run(args, &out, &errs); code != 0 || errs.Len() != 0 {
 			t.Fatalf("exit %d stderr %s", code, &errs)
 		}
-		for _, want := range []string{"bale push [options] LAYOUT DESTREF", "--dry-run", "without registry access", "existing remote tags are not checked", "dry-run: delivery preview"} {
+		for _, want := range []string{"bale push [options] BUNDLE DESTREF", "--dry-run", "without registry access", "existing remote tags are not checked", "dry-run: delivery preview"} {
 			if !strings.Contains(out.String(), want) {
 				t.Fatalf("missing %q: %s", want, &out)
 			}
@@ -97,15 +97,15 @@ func TestPushDryRunOptionsAndHelp(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"push", "--dry-run"}, "invalid arguments"},
-		{[]string{"push", "layout", "--dry-run"}, "invalid arguments"},
-		{[]string{"push", "layout", "mirror.example.com/b:tag", "extra", "--dry-run"}, "invalid arguments"},
-		{[]string{"push", "layout", "mirror.example.com/b:tag", "--dry-run", "--dry-run"}, "duplicate option"},
-		{[]string{"push", "layout", "mirror.example.com/b:tag", "--dry-run=maybe"}, "invalid boolean"},
-		{[]string{"push", "layout", "team/b:tag", "--dry-run"}, "explicit registry"},
-		{[]string{"push", "layout", "mirror.example.com/b", "--dry-run"}, "explicit tag"},
-		{[]string{"push", "layout", "mirror.example.com/b:tag", "--dry-run", "--map", "invalid"}, "--map requires"},
-		{[]string{"pull", "source.example.com/b:tag", "layout", "--dry-run"}, "unknown option"},
+		{[]string{"push", "--layout", "--dry-run"}, "invalid arguments"},
+		{[]string{"push", "--layout", "layout", "--dry-run"}, "invalid arguments"},
+		{[]string{"push", "--layout", "layout", "mirror.example.com/b:tag", "extra", "--dry-run"}, "invalid arguments"},
+		{[]string{"push", "--layout", "layout", "mirror.example.com/b:tag", "--dry-run", "--dry-run"}, "duplicate option"},
+		{[]string{"push", "--layout", "layout", "mirror.example.com/b:tag", "--dry-run=maybe"}, "invalid boolean"},
+		{[]string{"push", "--layout", "layout", "team/b:tag", "--dry-run"}, "explicit registry"},
+		{[]string{"push", "--layout", "layout", "mirror.example.com/b", "--dry-run"}, "explicit tag"},
+		{[]string{"push", "--layout", "layout", "mirror.example.com/b:tag", "--dry-run", "--map", "invalid"}, "--map requires"},
+		{[]string{"pull", "--layout", "source.example.com/b:tag", "layout", "--dry-run"}, "unknown option"},
 	} {
 		var out, errs bytes.Buffer
 		if code := run(tc.args, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), tc.want) {
@@ -124,12 +124,12 @@ func TestPushDryRunOutputErrorsAndCancellation(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", docker)
 	for _, format := range []string{"{{", "prefix{{.MissingField}}"} {
 		var out, errs bytes.Buffer
-		if code := run([]string{"push", dir, destination, "--dry-run", "--format", format}, &out, &errs); code != 125 || out.Len() != 0 || !strings.HasPrefix(errs.String(), "Error: ") {
+		if code := run([]string{"push", "--layout", dir, destination, "--dry-run", "--format", format}, &out, &errs); code != 125 || out.Len() != 0 || !strings.HasPrefix(errs.String(), "Error: ") {
 			t.Fatalf("%s: exit %d stdout %s stderr %s", format, code, &out, &errs)
 		}
 	}
 	for _, flags := range [][]string{nil, {"--format", "json"}, {"--format", "{{.Destination}}"}} {
-		args := append([]string{"push", dir, destination, "--dry-run"}, flags...)
+		args := append([]string{"push", "--layout", dir, destination, "--dry-run"}, flags...)
 		var errs bytes.Buffer
 		if code := run(args, brokenWriter{}, &errs); code != 125 || !strings.Contains(errs.String(), "write failed") {
 			t.Fatalf("%v: exit %d stderr %s", flags, code, &errs)
@@ -138,7 +138,7 @@ func TestPushDryRunOutputErrorsAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var out, errs bytes.Buffer
-	if code := runContext(ctx, []string{"push", dir, destination, "--dry-run"}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "context canceled") {
+	if code := runContext(ctx, []string{"push", "--layout", dir, destination, "--dry-run"}, &out, &errs); code != 125 || out.Len() != 0 || !strings.Contains(errs.String(), "context canceled") {
 		t.Fatalf("cancelled preview: exit %d stdout %s stderr %s", code, &out, &errs)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	digest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/deliveryfile"
@@ -66,13 +67,14 @@ type CreateOptions struct {
 	ExportDelivery bool
 }
 type CreateResult struct {
-	LayoutPath string             `json:"layoutPath,omitempty"`
-	Published  bool               `json:"published"`
-	Descriptor v1.Descriptor      `json:"descriptor"`
-	Metadata   bundle.Metadata    `json:"metadata"`
-	Stats      Stats              `json:"stats"`
-	DryRun     bool               `json:"dryRun"`
-	Delivery   *deliveryfile.File `json:"delivery,omitempty"`
+	MetadataOnly bool               `json:"metadataOnly,omitempty"`
+	LayoutPath   string             `json:"layoutPath,omitempty"`
+	Published    bool               `json:"published"`
+	Descriptor   v1.Descriptor      `json:"descriptor"`
+	Metadata     bundle.Metadata    `json:"metadata"`
+	Stats        Stats              `json:"stats"`
+	DryRun       bool               `json:"dryRun"`
+	Delivery     *deliveryfile.File `json:"delivery,omitempty"`
 }
 type PullMode string
 
@@ -112,7 +114,9 @@ type DestinationAttachment struct {
 	Record     destination.Record `json:"record"`
 }
 type DeliveryPlan struct {
-	Destinations []DestinationAttachment `json:"destinations"`
+	MetadataOnly  bool `json:"metadataOnly,omitempty"`
+	captureDigest digest.Digest
+	Destinations  []DestinationAttachment `json:"destinations"`
 	// Relocations lists planned canonical placements; Push confirms them after verification.
 	Relocations   Relocations          `json:"relocations"`
 	LayoutPath    string               `json:"layoutPath"`

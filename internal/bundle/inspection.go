@@ -27,11 +27,24 @@ func LoadSnapshotGraph(ctx context.Context, store content.ReadOnlyStorage, root 
 // application payloads, and therefore does not prove their availability or
 // integrity. Transfers and full inspection must use LoadSnapshotGraph instead.
 func InspectSnapshotGraph(ctx context.Context, store content.ReadOnlyStorage, root ocispec.Descriptor) (Snapshot, error) {
+	snapshot, _, err := InspectSnapshotInventory(ctx, store, root)
+	return snapshot, err
+}
+
+// InspectSnapshotInventory returns the role-aware descriptor inventory after
+// validating envelopes and interpreted metadata at every native bundle boundary.
+// Opaque payload bytes and their availability are not checked. The returned map
+// belongs to the caller and contains only the root's strong closure.
+func InspectSnapshotInventory(ctx context.Context, store content.ReadOnlyStorage, root ocispec.Descriptor) (Snapshot, map[digest.Digest]ocispec.Descriptor, error) {
 	inventory, err := walkGraphWithPayloads(ctx, store, root, nil, false)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, nil, err
 	}
-	return validateSnapshotGraph(ctx, store, root, inventory)
+	snapshot, err := validateSnapshotGraph(ctx, store, root, inventory)
+	if err != nil {
+		return Snapshot{}, nil, err
+	}
+	return snapshot, inventory, nil
 }
 
 func validateSnapshotGraph(ctx context.Context, store content.ReadOnlyStorage, root ocispec.Descriptor, inventory map[digest.Digest]ocispec.Descriptor) (Snapshot, error) {

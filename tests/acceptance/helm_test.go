@@ -64,7 +64,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPa
 	if err := os.Mkdir(docker, 0700); err != nil {
 		t.Fatal(err)
 	}
-	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + docker, "XDG_CACHE_HOME=" + filepath.Join(dir, "capture-cache")}, hosts: []string{source.host, destination.host}}
+	command := cli{t: t, ctx: ctx, binary: binary, env: []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + docker, "XDG_CACHE_HOME=" + filepath.Join(dir, "capture-cache"), "XDG_DATA_HOME=" + filepath.Join(dir, "data")}, hosts: []string{source.host, destination.host}}
 	client, err := bale.NewClient(bale.ClientOptions{PlainHTTPRegistries: command.hosts, HTTPClient: &http.Client{Timeout: 10 * time.Second}})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPa
 	offline := command
 	offline.hosts = nil
 	archive := filepath.Join(dir, "release.tar")
-	saved := decode[bale.ArchiveResult](t, offline.run("save Helm bundle offline", "save", original, "-o", archive, "--format", "json"))
+	saved := decode[bale.ArchiveResult](t, offline.run("save Helm bundle offline", "save", "--layout", original, "-o", archive, "--format", "json"))
 	if saved.Descriptor.Digest != captured.Descriptor.Digest {
 		t.Fatal("save changed snapshot")
 	}
@@ -107,7 +107,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPa
 		t.Fatal(err)
 	}
 	restored := filepath.Join(dir, "restored")
-	loaded := decode[bale.ArchiveResult](t, offline.run("load Helm bundle offline", "load", "-i", archive, restored, "--format", "json"))
+	loaded := decode[bale.ArchiveResult](t, offline.run("load Helm bundle offline", "load", "--layout", "-i", archive, restored, "--format", "json"))
 	if loaded.Descriptor.Digest != captured.Descriptor.Digest {
 		t.Fatal("load changed snapshot")
 	}
@@ -141,7 +141,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPa
 	}
 	writeFile(t, deliveryPath, raw)
 	completion := destination.host + "/helm-release:bundle"
-	pushed := decode[bale.PushResult](t, command.run("deliver restored Helm bundle", "push", restored, completion, "--delivery", deliveryPath, "--format", "json"))
+	pushed := decode[bale.PushResult](t, command.run("deliver restored Helm bundle", "push", "--layout", restored, completion, "--delivery", deliveryPath, "--format", "json"))
 	if pushed.Descriptor.Digest != captured.Descriptor.Digest {
 		t.Fatal("delivery changed snapshot")
 	}
@@ -203,7 +203,7 @@ func runHelmRegistryCycle(t *testing.T, ctx context.Context, binary, discoveryPa
 	if _, err := os.Stat(freshCache); !os.IsNotExist(err) {
 		t.Fatal("reuse cache already exists")
 	}
-	command.env = []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + docker, "XDG_CACHE_HOME=" + freshCache}
+	command.env = []string{"PATH=/nonexistent", "DOCKER_CONFIG=" + docker, "XDG_CACHE_HOME=" + freshCache, "XDG_DATA_HOME=" + filepath.Join(dir, "data")}
 	command.hosts = []string{destination.host}
 	writeHelmAcceptanceRecipe(t, recipe, delivered[0].Repository+":1.0.0", delivered[4].Repository+":v1", delivered[1].Repository+":stable", delivered[2].Repository+":stable", delivered[3].Repository+":stable", delivered[5].Repository+":0.0.0")
 	reusePath := filepath.Join(dir, "destination-only")

@@ -16,6 +16,8 @@
 let
   tests = bale.overrideAttrs {
     pname = "bale-registry-acceptance-tests";
+    src = bale.testSource;
+    goModules = bale.goModules;
     doCheck = false;
     buildPhase = ''
       runHook preBuild

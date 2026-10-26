@@ -2,13 +2,10 @@
   lib,
   buildGoModule,
   go_1_27,
-  golangci-lint,
   version ? "dev",
 }:
-(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
-  pname = "bale-helm-plugin";
-  inherit version;
-  src = lib.fileset.toSource {
+let
+  testSource = lib.fileset.toSource {
     root = ../plugins/helm;
     fileset = lib.fileset.fileFilter (
       file:
@@ -27,26 +24,31 @@
       ]
     ) ../plugins/helm;
   };
+in
+(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
+  pname = "bale-helm-plugin";
+  inherit version;
+  src = lib.cleanSourceWith {
+    src = testSource;
+    filter =
+      path: type:
+      let
+        name = builtins.baseNameOf path;
+      in
+      !(lib.hasSuffix "_test.go" name || (type == "directory" && name == "testdata"));
+  };
+  passthru.testSource = testSource;
+  overrideModAttrs = _: _: { src = testSource; };
   vendorHash = "sha256-IB9t0wiBwEAXNpcmaZYMrUVL24I9GDqNYTvlFf8Y+Pw=";
   modPostBuild = ''
     patch --batch --fuzz=0 -d vendor/helm.sh/helm/v4 -p1 < ${./patches/helm-offline.patch}
   '';
   env.CGO_ENABLED = "0";
-  nativeCheckInputs = [ golangci-lint ];
+  doCheck = false;
   buildPhase = ''
     runHook preBuild
     GOOS=wasip1 GOARCH=wasm go build -tags=helm_offline -ldflags="-s -w" -o helm.wasm ./cmd/bale-helm
     runHook postBuild
-  '';
-  checkPhase = ''
-    runHook preCheck
-    export GOLANGCI_LINT_CACHE="$TMPDIR/lint"
-    go test ./...
-    go test -tags=helm_offline ./...
-    go vet ./...
-    go vet -tags=helm_offline ./...
-    golangci-lint run
-    runHook postCheck
   '';
   installPhase = ''
     runHook preInstall

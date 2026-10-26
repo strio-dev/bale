@@ -34,8 +34,7 @@ jobs:
       quality: ${{ steps.matrix.outputs.quality }}
       docs: ${{ steps.matrix.outputs.docs }}
       native: ${{ steps.matrix.outputs.native }}
-      registry: ${{ steps.matrix.outputs.registry }}
-      integration: ${{ steps.matrix.outputs.integration }}
+      acceptance: ${{ steps.matrix.outputs.acceptance }}
       published: ${{ steps.release.outputs.published }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       image: ${{ steps.release.outputs.image }}
@@ -59,7 +58,7 @@ jobs:
       - id: matrix
         run: |
           matrices=$(nix eval --json --no-update-lock-file path:.#githubActions.matrices)
-          for category in quality docs native registry integration; do
+          for category in quality docs native acceptance; do
             printf '%s=%s\n' "$category" "$(jq -c --arg category "$category" '.[$category]' <<< "$matrices")" >> "$GITHUB_OUTPUT"
           done
       - name: Read release metadata
@@ -145,7 +144,7 @@ jobs:
   release-native:
     name: Native release checks
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [matrix, quality, documentation, registry, integration, vulnerabilities]
+    needs: [matrix, quality, documentation, acceptance, vulnerabilities]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     permissions:
@@ -226,27 +225,16 @@ jobs:
       - name: Check all Go modules
         run: nix run --no-update-lock-file path:.#dev-vuln
 
-  registry:
-    name: Registry acceptance
+  acceptance:
+    name: ${{ matrix.check }}
     needs: matrix
-    runs-on: ${{ fromJSON(needs.matrix.outputs.registry).include[0].os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.acceptance) }}
     env:
-      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.registry).include[0].attrs) }}
-    steps:
-      - *checkout
-      - *release-version
-      - *nix
-      - *nix-cache
-      - *check
-
-  integration:
-    name: Container acceptance
-    needs: matrix
-    runs-on: ${{ fromJSON(needs.matrix.outputs.integration).include[0].os }}
-    timeout-minutes: 45
-    env:
-      NIX_ATTRS: ${{ toJSON(fromJSON(needs.matrix.outputs.integration).include[0].attrs) }}
+      NIX_ATTRS: ${{ toJSON(matrix.attrs) }}
     steps:
       - *checkout
       - *release-version
@@ -277,7 +265,7 @@ jobs:
   docs:
     name: docs
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [quality, documentation, native, registry, integration, vulnerabilities]
+    needs: [quality, documentation, native, acceptance, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -297,7 +285,7 @@ jobs:
   release:
     name: Publish release artifacts
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [matrix, quality, documentation, release-native, registry, integration, vulnerabilities]
+    needs: [matrix, quality, documentation, release-native, acceptance, vulnerabilities]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:

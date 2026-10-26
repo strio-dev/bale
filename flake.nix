@@ -220,6 +220,7 @@
             inherit
               pkgs
               go
+              development
               bale
               container
               registry-acceptance

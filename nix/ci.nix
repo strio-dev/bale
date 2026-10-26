@@ -5,18 +5,22 @@
   ...
 }:
 let
+  acceptanceNames = {
+    registry-acceptance = "Registry acceptance";
+    container-acceptance = "Container acceptance";
+  };
   categories = {
     quality.x86_64-linux = lib.getAttrs [
       "go-check"
+      "helm-plugin-check"
+      "helm-consumer-check"
       "formatting"
-      "justfile"
       "workflow"
       "helm-plugin-integration"
       "wasm-contract-fixture"
     ] self.checks.x86_64-linux;
     docs.x86_64-linux = lib.getAttrs [ "docs" "installer" ] self.checks.x86_64-linux;
-    registry.x86_64-linux = lib.getAttrs [ "registry-acceptance" ] self.checks.x86_64-linux;
-    integration.x86_64-linux = lib.getAttrs [ "container-acceptance" ] self.checks.x86_64-linux;
+    acceptance.x86_64-linux = lib.getAttrs (builtins.attrNames acceptanceNames) self.checks.x86_64-linux;
     native = lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
       system:
       lib.getAttrs (
@@ -37,6 +41,8 @@ let
         ]
         ++ lib.optionals (system == "aarch64-linux") [
           "go-check"
+          "helm-plugin-check"
+          "helm-consumer-check"
           "helm-plugin-integration"
         ]
       ) self.checks.${system}
@@ -51,17 +57,26 @@ let
       };
     in
     {
-      include = map (
-        system:
-        let
-          rows = builtins.filter (row: row.system == system) generated.matrix.include;
-        in
-        {
-          inherit name system;
-          os = (builtins.head rows).os;
-          attrs = map (row: row.attr) rows;
-        }
-      ) (builtins.attrNames checks);
+      include =
+        if name == "acceptance" then
+          map (row: {
+            inherit name;
+            inherit (row) system os;
+            attrs = [ row.attr ];
+            check = acceptanceNames.${builtins.fromJSON (lib.last (lib.splitString "." row.attr))};
+          }) generated.matrix.include
+        else
+          map (
+            system:
+            let
+              rows = builtins.filter (row: row.system == system) generated.matrix.include;
+            in
+            {
+              inherit name system;
+              os = (builtins.head rows).os;
+              attrs = map (row: row.attr) rows;
+            }
+          ) (builtins.attrNames checks);
     }
     // lib.optionalAttrs (name == "native") {
       system = builtins.attrNames checks;

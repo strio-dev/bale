@@ -4,10 +4,8 @@
   go_1_27,
   version ? "dev",
 }:
-(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
-  pname = "bale";
-  inherit version;
-  src = lib.fileset.toSource {
+let
+  testSource = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
       ../cmd
@@ -25,8 +23,34 @@
       ../LICENSE
     ];
   };
+in
+(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
+  pname = "bale";
+  inherit version;
+  src = lib.cleanSourceWith {
+    src = testSource;
+    filter =
+      path: type:
+      let
+        name = builtins.baseNameOf path;
+      in
+      !(
+        lib.hasSuffix "_test.go" name
+        || (
+          type == "directory"
+          && lib.elem name [
+            "testdata"
+            "tests"
+          ]
+        )
+      );
+  };
+  passthru.testSource = testSource;
+  # Keep test imports in the pinned vendor tree used by dedicated checks.
+  overrideModAttrs = _: _: { src = testSource; };
   vendorHash = "sha256-ikLcKoSsS6+TSgiH2uHNF4NnFxfCr52x4mMQ8h02DDY=";
   subPackages = [ "cmd/bale" ];
+  doCheck = false;
   env.CGO_ENABLED = "0";
   ldflags = [
     "-s"

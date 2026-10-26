@@ -3,7 +3,6 @@
   stdenv,
   buildGoModule,
   go_1_27,
-  golangci-lint,
   version ? "dev",
   consumer ? "helm",
 }:
@@ -13,12 +12,7 @@ assert lib.elem consumer [
 ];
 let
   pluginVersion = if version == "dev" then "0.0.0" else lib.removePrefix "v" version;
-in
-(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
-  pname = if consumer == "helm" then "bale-helm-consumer" else "bale-flux-service";
-  inherit version;
-  passthru = { inherit pluginVersion; };
-  src = lib.fileset.toSource {
+  testSource = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
       ../plugins/helm-relocate
@@ -33,6 +27,30 @@ in
       ))
     ];
   };
+in
+(buildGoModule.override { go = go_1_27; }) (finalAttrs: {
+  pname = if consumer == "helm" then "bale-helm-consumer" else "bale-flux-service";
+  inherit version;
+  passthru = { inherit pluginVersion testSource; };
+  src = lib.cleanSourceWith {
+    src = testSource;
+    filter =
+      path: type:
+      let
+        name = builtins.baseNameOf path;
+      in
+      !(
+        lib.hasSuffix "_test.go" name
+        || (
+          type == "directory"
+          && lib.elem name [
+            "testdata"
+            "examples"
+          ]
+        )
+      );
+  };
+  overrideModAttrs = _: _: { src = testSource; };
   modRoot = "plugins/helm-relocate";
   vendorHash = "sha256-6epVc+e0K2ntVWy9QH2v+8uPPfnkjUsOKBJ3uF3wqY4=";
   subPackages =
@@ -44,19 +62,11 @@ in
     else
       [ "cmd/bale-flux" ];
   env.CGO_ENABLED = "0";
+  doCheck = false;
   ldflags = [
     "-s"
     "-w"
   ];
-  nativeCheckInputs = [ golangci-lint ];
-  checkPhase = ''
-    runHook preCheck
-    export GOLANGCI_LINT_CACHE="$TMPDIR/lint"
-    go test ./...
-    go vet ./...
-    golangci-lint run
-    runHook postCheck
-  '';
   postInstall =
     let
       vendorSource =

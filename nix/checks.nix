@@ -1,6 +1,7 @@
 {
   pkgs,
   go,
+  development,
   bale,
   container,
   registry-acceptance,
@@ -20,16 +21,25 @@
   release,
 }:
 let
-  quality = bale.overrideAttrs {
-    nativeCheckInputs = [ pkgs.golangci-lint ];
-    checkPhase = ''
-      export HOME="$TMPDIR"
-      export GOLANGCI_LINT_CACHE="$TMPDIR/lint"
-      go test ./...
-      go vet ./...
-      golangci-lint run
-    '';
-  };
+  goCheck =
+    name: package: command: inputs:
+    package.overrideAttrs {
+      pname = "bale-${name}";
+      src = package.testSource;
+      goModules = package.goModules;
+      doCheck = true;
+      nativeCheckInputs = inputs;
+      buildPhase = "runHook preBuild; runHook postBuild";
+      checkPhase = ''
+        runHook preCheck
+        export HOME="$TMPDIR"
+        export GOLANGCI_LINT_CACHE="$TMPDIR/lint"
+        ${command}
+        runHook postCheck
+      '';
+      installPhase = ''touch "$out"'';
+      postInstall = "";
+    };
 in
 {
   build = bale;
@@ -45,7 +55,23 @@ in
     touch "$out"
   '';
   installer = pkgs.callPackage ./installer-check.nix { };
-  go-check = quality;
+  go-check = goCheck "go-check" bale ''
+    go test ./...
+    go vet ./...
+    golangci-lint run
+  '' [ pkgs.golangci-lint ];
+  helm-plugin-check = goCheck "helm-plugin-check" helm-plugin ''
+    go test ./...
+    go test -tags=helm_offline ./...
+    go vet ./...
+    go vet -tags=helm_offline ./...
+    golangci-lint run
+  '' [ pkgs.golangci-lint ];
+  helm-consumer-check = goCheck "helm-consumer-check" helm-consumer ''
+    go test ./...
+    go vet ./...
+    golangci-lint run
+  '' [ pkgs.golangci-lint ];
   inherit
     helm-plugin
     helm-plugin-archive
@@ -58,17 +84,16 @@ in
     flux-service-image
     flux-service-chart
     ;
-  helm-plugin-integration = bale.overrideAttrs (old: {
-    pname = "bale-helm-plugin-integration";
-    env = old.env // {
-      BALE_HELM_PLUGIN = "${helm-plugin}/lib/bale/plugins/helm.wasm";
-      BALE_HELM_PLUGIN_ARCHIVE = "${helm-plugin-archive}/${helm-plugin-archive.archiveName}";
-    };
-    checkPhase = ''
-      export HOME="$TMPDIR"
+  helm-plugin-integration =
+    (goCheck "helm-plugin-integration" bale ''
       go test ./tests/integration -run TestHelmPlugin -count=1 -timeout=5m
-    '';
-  });
+    '' [ ]).overrideAttrs
+      (old: {
+        env = old.env // {
+          BALE_HELM_PLUGIN = "${helm-plugin}/lib/bale/plugins/helm.wasm";
+          BALE_HELM_PLUGIN_ARCHIVE = "${helm-plugin-archive}/${helm-plugin-archive.archiveName}";
+        };
+      });
   inherit docs;
   workflow =
     pkgs.runCommand "bale-workflow"
@@ -88,18 +113,17 @@ in
       {
         nativeBuildInputs = [
           go
+          pkgs.findutils
           pkgs.nixfmt
+          pkgs.just
         ];
       }
       ''
-        test -z "$(gofmt -l ${bale.src} ${helm-plugin.src} ${helm-consumer.src})"
-        find ${../flake.nix} ${./.} -name '*.nix' -type f -print0 | xargs -0 nixfmt --check
+        cd ${development.formatSource}
+        set -- --check
+        ${development.format}
         touch "$out"
       '';
-  justfile = pkgs.runCommand "bale-justfile" { nativeBuildInputs = [ pkgs.just ]; } ''
-    just --justfile ${../Justfile} --fmt --check
-    touch "$out"
-  '';
 }
 // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
   container-acceptance = pkgs.callPackage ./container-acceptance.nix {

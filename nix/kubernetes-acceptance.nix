@@ -11,6 +11,9 @@ let
   inputs = import ./kubernetes-inputs.nix { inherit pkgs; };
   fixtures = bale.overrideAttrs {
     pname = "bale-kubernetes-fixtures";
+    src = bale.testSource;
+    goModules = bale.goModules;
+    doCheck = true;
     subPackages = [
       "tests/kubernetes/fixture"
       "tests/kubernetes/workload"

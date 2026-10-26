@@ -16,7 +16,6 @@ let
     "plugins/helm-relocate"
   ];
   goPaths = [
-    "."
     "cmd"
     "internal"
     "plugin"
@@ -24,15 +23,39 @@ let
     "tests"
   ]
   ++ builtins.tail modules;
+  formatSource = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions (
+      map (path: lib.fileset.fileFilter (file: file.hasExt "go") (../. + "/${path}")) goPaths
+      ++ map (name: ../. + "/${name}") (
+        builtins.filter (name: lib.hasSuffix ".go" name) (builtins.attrNames (builtins.readDir ../.))
+      )
+      ++ [
+        ../flake.nix
+        (lib.fileset.fileFilter (file: file.hasExt "nix") ./.)
+        ../Justfile
+      ]
+    );
+  };
   # The same formatter inputs are used by checkout commands and flake checks.
   format = ''
-    find ${lib.escapeShellArgs goPaths} -maxdepth 0 -type d -print0 | while IFS= read -r -d "" directory; do
-      if [[ "$directory" == . ]]; then
-        find . -maxdepth 1 -name '*.go' -print0
-      else
-        find "$directory" -name '*.go' -print0
-      fi
-    done | xargs -0 -r gofmt "$@"
+    gofmt_args=(-w)
+    nixfmt_args=()
+    just_args=()
+    if [[ "''${1:-}" == --check ]]; then
+      shift
+      gofmt_args=(-l)
+      nixfmt_args=(--check)
+      just_args=(--check)
+    fi
+    unformatted="$({
+      find . -maxdepth 1 -type f -name '*.go' -print0
+      find ${lib.escapeShellArgs goPaths} -type f -name '*.go' -print0
+    } | xargs -0 -r gofmt "''${gofmt_args[@]}" "$@")"
+    if [[ -n "$unformatted" ]]; then
+      printf 'Unformatted Go files:\n%s\n' "$unformatted" >&2
+      exit 1
+    fi
     find flake.nix nix -type f -name '*.nix' -print0 | xargs -0 -r nixfmt "''${nixfmt_args[@]}"
     just --fmt "''${just_args[@]}"
   '';
@@ -61,7 +84,7 @@ let
   '';
 in
 {
-  inherit modules goPaths format;
+  inherit formatSource format;
   commands = {
     test = command "test" [ ] (eachModule ''go test ./... "$@"'');
     vet = command "vet" [ ] (eachModule ''go vet ./... "$@"'');
@@ -73,11 +96,6 @@ in
       if (( $# )); then shift; fi
       ${eachModule ''"$go_binary" build ./... "$@"''}
     '';
-    fmt = command "fmt" [ findutils nixfmt just ] ''
-      set -- -w "$@"
-      nixfmt_args=()
-      just_args=()
-      ${format}
-    '';
+    fmt = command "fmt" [ findutils nixfmt just ] format;
   };
 }

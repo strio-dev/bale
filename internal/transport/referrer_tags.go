@@ -105,7 +105,7 @@ func (s *Service) preflightManagedTags(ctx context.Context, src content.Fetcher,
 }
 
 func (s *Service) validateManagedInventory(ctx context.Context, tag managedTag) error {
-	repo, err := s.repository(tag.repository)
+	repo, err := s.repository(ctx, tag.repository)
 	if err != nil {
 		return err
 	}

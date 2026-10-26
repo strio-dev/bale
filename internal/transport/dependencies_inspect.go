@@ -22,9 +22,9 @@ func (s *Service) InspectDependencies(ctx context.Context, subjectReference stri
 	fail := func(kind, err error) ([]InspectedDeclaration, error) {
 		return nil, operationError("inspect dependencies", root.Repository, root.Descriptor, kind, err)
 	}
-	repo, err := s.repository(root.Repository)
+	repo, err := s.repository(ctx, root.Repository)
 	if err != nil {
-		return fail(ErrInvalid, err)
+		return fail(nil, err)
 	}
 	metadataCtx := context.WithValue(ctx, dependencyMetadataLimitKey{}, dependency.MaxBytes)
 	refs, err := listPinnedReferrers(metadataCtx, repo, root.Descriptor, ListReferrersOptions{})

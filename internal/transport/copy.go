@@ -13,12 +13,12 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 // copyGraph walks children even when a destination already has its parent.
 // Registry existence alone is not evidence of a complete graph.
 func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, root v1.Descriptor, stats *Stats, mountSource map[digest.Digest]string) error {
+	blobs, registryDestination := registryBlobs(dst)
 	seen := map[string]bool{}
 	var walk func(v1.Descriptor, bool) error
 	walk = func(d v1.Descriptor, isEnvelope bool) (retErr error) {
@@ -46,8 +46,8 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 				// independently of an existing manifest registration. Preserve both
 				// views before publishing (or reusing) the containing manifest.
 				if (d.MediaType == v1.MediaTypeImageManifest || d.MediaType == bundle.DockerManifest) && i > 0 && bundle.IsEnvelope(child.MediaType) {
-					if repo, ok := dst.(*remote.Repository); ok {
-						if err := registerEnvelopeLayerBlob(ctx, src, repo, child, stats); err != nil {
+					if registryDestination {
+						if err := registerEnvelopeLayerBlob(ctx, src, dst, child, stats); err != nil {
 							return err
 						}
 					}
@@ -57,9 +57,9 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 		destination := dst
 		var exists bool
 		var err error
-		if r, ok := dst.(*remote.Repository); ok && !isEnvelope {
-			destination = r.Blobs()
-			exists, err = remoteBlobExists(ctx, r, d)
+		if registryDestination && !isEnvelope {
+			destination = blobs
+			exists, err = remoteBlobExists(ctx, dst, d)
 		} else {
 			exists, err = destination.Exists(ctx, d)
 		}
@@ -81,22 +81,22 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 			if d.Data != nil {
 				return io.NopCloser(bytes.NewReader(d.Data)), nil
 			}
-			if r, ok := src.(*remote.Repository); ok {
-				return r.Blobs().Fetch(ctx, d)
+			if blobs, ok := registryBlobs(src); ok {
+				return blobs.Fetch(ctx, d)
 			}
 			return src.Fetch(ctx, d)
 		}
-		if remoteDst, ok := dst.(*remote.Repository); ok && mountSource != nil {
+		if mounter, destinationRef, ok := registryMount(dst); ok && mountSource != nil {
 			if name := mountSource[d.Digest]; name != "" {
 				ref, err := registry.ParseReference(name)
 				if err != nil {
 					return err
 				}
-				if ref.Registry == remoteDst.Reference.Registry && ref.Repository != remoteDst.Reference.Repository {
+				if ref.Registry == destinationRef.Registry && ref.Repository != destinationRef.Repository {
 					uploaded := false
 					var verified *content.VerifyReader
 					var mountedReader io.ReadCloser
-					err = remoteDst.Mount(ctx, d, ref.Repository, func() (io.ReadCloser, error) {
+					err = mounter.Mount(ctx, d, ref.Repository, func() (io.ReadCloser, error) {
 						uploaded = true
 						rc, err := fetch()
 						if err != nil {
@@ -118,7 +118,7 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 						}
 						stats.BlobBytesUploaded += d.Size
 					} else {
-						if exists, err := remoteBlobExists(ctx, remoteDst, d); err != nil {
+						if exists, err := remoteBlobExists(ctx, dst, d); err != nil {
 							return err
 						} else if !exists {
 							return fmt.Errorf("mounted blob %s is unavailable", d.Digest)
@@ -166,7 +166,7 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 	return nil
 }
 
-func registerEnvelopeLayerBlob(ctx context.Context, src content.Fetcher, dst *remote.Repository, d v1.Descriptor, stats *Stats) error {
+func registerEnvelopeLayerBlob(ctx context.Context, src content.Fetcher, dst content.Storage, d v1.Descriptor, stats *Stats) error {
 	exists, err := remoteBlobExists(ctx, dst, d)
 	if err != nil {
 		return err
@@ -182,7 +182,11 @@ func registerEnvelopeLayerBlob(ctx context.Context, src content.Fetcher, dst *re
 	if err != nil {
 		return err
 	}
-	if err := dst.Blobs().Push(ctx, d, bytes.NewReader(raw)); err != nil {
+	blobs, ok := registryBlobs(dst)
+	if !ok {
+		return fmt.Errorf("%w: destination cannot store layer blobs", ErrUnsupported)
+	}
+	if err := blobs.Push(ctx, d, bytes.NewReader(raw)); err != nil {
 		if errors.Is(err, errdef.ErrAlreadyExists) {
 			stats.ObjectsSkipped++
 			return nil
@@ -196,7 +200,7 @@ func registerEnvelopeLayerBlob(ctx context.Context, src content.Fetcher, dst *re
 // verifyRemoteClosure verifies original envelope bytes and checks payload
 // availability without downloading reused payloads. Full offline verification
 // reads payload bytes in openLayout and Pull.
-func verifyRemoteClosure(ctx context.Context, repo *remote.Repository, root v1.Descriptor) error {
+func verifyRemoteClosure(ctx context.Context, repo content.ReadOnlyStorage, root v1.Descriptor) error {
 	seen := map[string]bool{}
 	var walk func(v1.Descriptor, bool) error
 	walk = func(d v1.Descriptor, isEnvelope bool) error {
@@ -247,8 +251,12 @@ func verifyRemoteClosure(ctx context.Context, repo *remote.Repository, root v1.D
 // Blob existence is insufficient: ORAS Exists only resolves the digest and does
 // not compare the expected size. HEAD validates reused bytes without fetching
 // them. Payload media types remain opaque and are not part of blob identity.
-func remoteBlobExists(ctx context.Context, repo *remote.Repository, expected v1.Descriptor) (bool, error) {
-	actual, err := repo.Blobs().Resolve(ctx, expected.Digest.String())
+func remoteBlobExists(ctx context.Context, repo any, expected v1.Descriptor) (bool, error) {
+	blobs, ok := registryBlobs(repo)
+	if !ok {
+		return false, fmt.Errorf("%w: registry has no blob store", ErrUnsupported)
+	}
+	actual, err := blobs.Resolve(ctx, expected.Digest.String())
 	if errors.Is(err, errdef.ErrNotFound) {
 		return false, nil
 	}
@@ -279,8 +287,8 @@ func fetchEnvelopeBytes(ctx context.Context, src content.Fetcher, d v1.Descripto
 		return content.ReadAll(bytes.NewReader(d.Data), d)
 	}
 	raw, err := content.FetchAll(ctx, src, d)
-	if repo, ok := src.(*remote.Repository); ok && errors.Is(err, errdef.ErrNotFound) {
-		return content.FetchAll(ctx, repo.Blobs(), d)
+	if blobs, ok := registryBlobs(src); ok && errors.Is(err, errdef.ErrNotFound) {
+		return content.FetchAll(ctx, blobs, d)
 	}
 	return raw, err
 }

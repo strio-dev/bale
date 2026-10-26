@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,7 +40,7 @@ func TestCopyRegistersEnvelopeLayersAsBlobs(t *testing.T) {
 				t.Fatal(err)
 			}
 			root = put(t, source.store, v1.MediaTypeImageManifest, outer)
-			src, err := service.repository(sourceName)
+			src, err := service.repository(context.Background(), sourceName)
 			if err != nil {
 				t.Fatal(err)
 			}

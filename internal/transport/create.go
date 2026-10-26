@@ -48,7 +48,7 @@ func (s *Service) Create(ctx context.Context, recipe config.Recipe, storageRef s
 	if opts.DryRun {
 		return result, nil
 	}
-	repo, err := s.repository(completion.Repository)
+	repo, err := s.repository(ctx, completion.Repository)
 	if err != nil {
 		return result, err
 	}

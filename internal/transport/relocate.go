@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/config"
 	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
 )
 
@@ -103,9 +105,9 @@ func (s *Service) Resolve(ctx context.Context, reference string) (Root, error) {
 		return Root{}, operationError("resolve", reference, v1.Descriptor{}, ErrInvalid, err)
 	}
 	name := repositoryName(ref)
-	repo, err := s.repository(name)
+	repo, err := s.repository(ctx, name)
 	if err != nil {
-		return Root{}, operationError("resolve", name, v1.Descriptor{}, ErrInvalid, err)
+		return Root{}, operationError("resolve", name, v1.Descriptor{}, nil, err)
 	}
 	d, err := repo.Resolve(ctx, ref.Reference)
 	if err != nil {
@@ -324,9 +326,9 @@ func (s *Service) Execute(ctx context.Context, plan *TransferPlan) (result Resul
 		}
 	}
 	for _, entry := range view.Repositories {
-		repo, err := s.repository(entry.Repository)
+		repo, err := s.repository(ctx, entry.Repository)
 		if err != nil {
-			return fail("execute", entry.Repository, v1.Descriptor{}, ErrInvalid, err)
+			return fail("execute", entry.Repository, v1.Descriptor{}, nil, err)
 		}
 		for _, root := range entry.Roots {
 			if err := copyGraph(ctx, g, repo, root, &result.Stats, g.source); err != nil {
@@ -346,18 +348,21 @@ func (s *Service) Execute(ctx context.Context, plan *TransferPlan) (result Resul
 		}
 	}
 	for _, a := range view.Referrers {
-		repo, err := s.repository(a.Repository)
+		repo, err := s.repository(ctx, a.Repository)
 		if err != nil {
-			return fail("referrers", a.Repository, a.Descriptor, ErrInvalid, err)
+			return fail("referrers", a.Repository, a.Descriptor, nil, err)
 		}
 		raw, err := content.FetchAll(ctx, g, a.Descriptor)
 		if err != nil {
 			return fail("referrers", a.Repository, a.Descriptor, nil, err)
 		}
-		if err := repo.Push(ctx, a.Descriptor, bytes.NewReader(raw)); err != nil {
+		if err := repo.Push(ctx, a.Descriptor, bytes.NewReader(raw)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
 			return fail("referrers", a.Repository, a.Descriptor, nil, err)
+		} else if err != nil {
+			result.Stats.ObjectsSkipped++
+		} else {
+			result.Stats.ManifestBytesUploaded += int64(len(raw))
 		}
-		result.Stats.ManifestBytesUploaded += int64(len(raw))
 		refs, err := listPinnedReferrers(ctx, repo, a.Subject, ListReferrersOptions{})
 		if err != nil {
 			return fail("referrers", a.Repository, a.Descriptor, nil, err)
@@ -371,9 +376,9 @@ func (s *Service) Execute(ctx context.Context, plan *TransferPlan) (result Resul
 		if err := s.checkTag(ctx, tag); err != nil {
 			return fail("tag", tag.Repository, tag.Descriptor, nil, err)
 		}
-		repo, err := s.repository(tag.Repository)
+		repo, err := s.repository(ctx, tag.Repository)
 		if err != nil {
-			return fail("tag", tag.Repository, tag.Descriptor, ErrInvalid, err)
+			return fail("tag", tag.Repository, tag.Descriptor, nil, err)
 		}
 		if err := repo.Tag(ctx, tag.Descriptor, tag.Reference); err != nil {
 			return fail("tag", tag.Repository, tag.Descriptor, nil, err)

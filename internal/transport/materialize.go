@@ -6,7 +6,6 @@ import (
 
 	"github.com/strio-dev/bale/internal/bundle"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 // PullInto retrieves a complete bundle into caller-owned storage. The caller
@@ -94,7 +93,7 @@ func (s *Service) MaterializeInto(ctx context.Context, root Root, state *Capture
 		source = captureSource{local: root.Store, service: s, sources: pinned.Sources, stats: &result.Stats}
 	}
 	defer func() {
-		if _, remote := root.Store.(*remote.Repository); remote && state == nil {
+		if _, remote := registryBlobs(root.Store); remote && state == nil {
 			result.Stats.BlobBytesDownloaded = result.Stats.BlobBytesUploaded
 			result.Stats.ManifestBytesDownloaded = result.Stats.ManifestBytesUploaded
 		}

@@ -15,7 +15,6 @@ import (
 	"github.com/strio-dev/bale/internal/pluginoci"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 func recipeHasPlugins(recipe config.Recipe) bool {
@@ -47,8 +46,8 @@ func (s overlayStorage) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadClos
 	} else if ok {
 		return s.local.Fetch(ctx, d)
 	}
-	if r, ok := s.source.(*remote.Repository); ok && !bundle.IsEnvelope(d.MediaType) {
-		return r.Blobs().Fetch(ctx, d)
+	if blobs, ok := registryBlobs(s.source); ok && !bundle.IsEnvelope(d.MediaType) {
+		return blobs.Fetch(ctx, d)
 	}
 	return s.source.Fetch(ctx, d)
 }
@@ -56,8 +55,8 @@ func (s overlayStorage) Exists(ctx context.Context, d v1.Descriptor) (bool, erro
 	if ok, err := s.local.Exists(ctx, d); err != nil || ok {
 		return ok, err
 	}
-	if r, ok := s.source.(*remote.Repository); ok && !bundle.IsEnvelope(d.MediaType) {
-		return remoteBlobExists(ctx, r, d)
+	if _, ok := registryBlobs(s.source); ok && !bundle.IsEnvelope(d.MediaType) {
+		return remoteBlobExists(ctx, s.source, d)
 	}
 	return s.source.Exists(ctx, d)
 }
@@ -72,8 +71,8 @@ func captureBlobExists(ctx context.Context, store content.ReadOnlyStorage, d v1.
 		}
 		return captureBlobExists(ctx, overlay.source, d)
 	}
-	if remoteStore, ok := store.(*remote.Repository); ok {
-		exists, err := remoteBlobExists(ctx, remoteStore, d)
+	if _, ok := registryBlobs(store); ok {
+		exists, err := remoteBlobExists(ctx, store, d)
 		return exists, 0, err
 	}
 	raw, err := content.FetchAll(ctx, store, d)
@@ -105,7 +104,7 @@ func (g *graph) pluginInput(ctx context.Context, root bundle.Root, plugin *confi
 		if root.Descriptor.MediaType != v1.MediaTypeImageManifest {
 			return nil, fmt.Errorf("%w: plugin blob bindings require an OCI image manifest", ErrUnsupported)
 		}
-		store, err := g.store(root.Repository)
+		store, err := g.store(ctx, root.Repository)
 		if err != nil {
 			return nil, err
 		}
@@ -224,7 +223,7 @@ func (g *graph) capturePlugin(ctx context.Context, root bundle.Root, plugin *con
 	}
 	repository := repositoryName(ref)
 	descriptor := resolved[repository+"@"+ref.Reference]
-	store, err := g.store(repository)
+	store, err := g.store(ctx, repository)
 	if err != nil {
 		return err
 	}

@@ -69,7 +69,7 @@ func TestCreateRejectsWrongSourcePayloadSizeBeforePublication(t *testing.T) {
 func TestCopyRejectsWrongExistingDestinationPayloadSize(t *testing.T) {
 	r, repo, s := testRegistry(t)
 	root := wrongSizeRoot(t, r)
-	dst, err := s.repository(repo)
+	dst, err := s.repository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCopyRejectsWrongExistingDestinationPayloadSize(t *testing.T) {
 func TestVerifyRemoteClosureRejectsWrongPayloadSize(t *testing.T) {
 	r, repo, s := testRegistry(t)
 	root := wrongSizeRoot(t, r)
-	dst, err := s.repository(repo)
+	dst, err := s.repository(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestCopyValidatesSuccessfulMountDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dst, err := s.repository(host + "/target")
+	dst, err := s.repository(context.Background(), host+"/target")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestRepositoryReferrerFallbackUpdateNeverDeletesOldIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, err := s.repository(host + "/test")
+	repo, err := s.repository(context.Background(), host+"/test")
 	if err != nil {
 		t.Fatal(err)
 	}

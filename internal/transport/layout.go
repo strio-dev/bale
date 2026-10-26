@@ -50,7 +50,7 @@ func (s *Service) PullWithOptions(ctx context.Context, bundleRef, layoutPath str
 	if err != nil {
 		return result, operationError("reference", bundleRef, v1.Descriptor{}, ErrInvalid, err)
 	}
-	repo, err := s.repository(repositoryName(ref))
+	repo, err := s.repository(ctx, repositoryName(ref))
 	if err != nil {
 		return result, err
 	}

@@ -1,4 +1,5 @@
 {
+  lib,
   writeShellApplication,
   oras,
   kubernetes-helm,
@@ -35,7 +36,7 @@ writeShellApplication {
         ;;
       bale-flux) source=${flux-service-image}:${flux-service-image.imageTag} ;;
       bale-flux-chart)
-        exec helm push ${flux-service-chart}/bale-flux-${flux-service-chart.chartVersion}.tgz "$destination" "$@"
+        exec helm push ${lib.escapeShellArg "${flux-service-chart}/bale-flux-${flux-service-chart.chartVersion}.tgz"} "$destination" "$@"
         ;;
       *) echo "Unknown distribution artifact: $artifact" >&2; exit 2 ;;
     esac

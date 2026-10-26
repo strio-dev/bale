@@ -6,9 +6,9 @@ Install Flux and [Flux Operator](https://fluxoperator.dev/) first. You also need
 
 ## Build and deliver the adapter
 
-[Build and publish](development/releases.md#build-integrations) the service image and bootstrap chart. The image targets the build host's Linux platform; AMD64 and ARM64 are supported. These builds need no container runtime.
+Tagged releases publish the multiarchitecture `ghcr.io/strio-dev/bale-flux` image and `oci://ghcr.io/strio-dev/bale/charts/bale-flux` chart. For custom registries, [build and publish](development/releases.md#build-integrations) them with Nix; no container runtime is required.
 
-Copy the [bootstrap recipe](examples/flux-bootstrap/bale.yaml) to `bale.yaml` and replace its references with your published artifacts. It includes both the image and chart explicitly:
+Copy the [bootstrap recipe](examples/flux-bootstrap/bale.yaml) to `bale.yaml`. Replace `VERSION_OCI` with a released tag, encoding `+` as `_`. It includes both the image and chart explicitly:
 
 ```sh
 bale create -f bale.yaml -t bootstrap:v1 --output-delivery bale.delivery.yaml
@@ -40,11 +40,11 @@ Copy the [bootstrap values](examples/flux-bootstrap/values.yaml) to `values.yaml
 
 ```sh
 kubectl -n flux-system create configmap bale-flux-releases --from-file=releases.yaml
-helm upgrade resolver oci://mirror.example.com/release/charts/bale-flux:0.0.0-dev \
-  --install --namespace flux-system --values values.yaml --wait
+helm upgrade resolver oci://mirror.example.com/release/charts/bale-flux \
+  --version VERSION --install --namespace flux-system --values values.yaml --wait
 ```
 
-For a private CA, [log in with Helm](helm.md#private-registry-access) and add `--ca-file registry-ca.crt`. Plain Helm bootstraps the adapter using the image location in your values.
+Use the original release tag for `VERSION`, including any `+` build metadata. For a private CA, [log in with Helm](helm.md#private-registry-access) and add `--ca-file registry-ca.crt`. Plain Helm bootstraps the adapter using the image location in your values.
 
 The example serves bearer-authenticated HTTPS at `https://resolver-bale-flux.flux-system.svc:8080`. Its certificate must cover that Service name. The chart installs the adapter Deployment and internal Service; install providers and ResourceSets separately.
 

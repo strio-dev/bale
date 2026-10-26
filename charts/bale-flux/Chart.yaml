@@ -4,3 +4,5 @@ description: Bale destination attachment inputs for Flux Operator
 version: 0.0.0-dev
 appVersion: "dev"
 type: application
+annotations:
+  org.opencontainers.image.source: https://github.com/strio-dev/bale

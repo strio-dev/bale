@@ -48,4 +48,4 @@ Open <http://127.0.0.1:8000>. The strict build writes `result-docs/`. Add pages 
 
 ## Releases
 
-Version tags publish the CLI archives and container image. See [packaging and releases](development/releases.md) to build integration artifacts, publish them to OCI or prepare a release.
+Version tags publish the CLI archives, images, plugins and Flux chart. See [packaging and releases](development/releases.md) for their registry references and local builds.

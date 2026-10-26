@@ -6,13 +6,13 @@ Capture needs Bale and registry access. Deployment needs Helm 4 and the native B
 
 ## Publish and configure discovery
 
-[Build and publish the discovery package](development/releases.md#build-integrations) to a registry your capture machine can read. Select it in `bale.yaml`, replacing these chart and plugin references:
+Tagged releases publish the discovery package below. Replace `VERSION_OCI` with a release tag, encoding `+` as `_`, and select your chart in `bale.yaml`. For custom registries, [build and publish](development/releases.md#publish-artifacts) your own package.
 
 ```yaml
 include:
   - ref: registry.example.com/charts/web:1.4
     plugin:
-      ref: registry.example.com/plugins/helm:1
+      ref: ghcr.io/strio-dev/bale/plugins/helm-discovery:VERSION_OCI
       input:
         schemaVersion: 1
         release: web
@@ -29,21 +29,18 @@ This captures chart-default images. Include deployment-specific images as ordina
 
 ## Use delivered images in Helm
 
-The native plugin includes the `helm bale` command and its private post-renderer. Build it for the deployment machine, or carry its OCI package in the bundle below. [Integration builds](development/releases.md#build-integrations) support Linux AMD64 and ARM64.
-
-To install a locally built development archive:
+The native plugin includes the `helm bale` command and its private post-renderer. Install the released package matching the deployment machine, or carry it in the bundle below. Use `linux-arm64` on ARM64:
 
 ```sh
-just helm-consumer-package
-helm plugin install result-helm-consumer-archive/bale-0.0.0.tgz --verify=false
+helm plugin install oci://ghcr.io/strio-dev/bale/plugins/bale:VERSION_OCI-linux-amd64 --verify=false
 ```
 
 ### Package and transfer
 
-[Publish the native package](development/releases.md#publish-artifacts), then add it to the recipe's existing `include` list:
+Add the released native package to the recipe's existing `include` list. [Local builds and custom publication](development/releases.md#build-integrations) remain available:
 
 ```yaml
-  - registry.example.com/plugins/bale:0.0.0-linux-amd64
+  - ghcr.io/strio-dev/bale/plugins/bale:VERSION_OCI-linux-amd64
 ```
 
 Choose the package matching the receiving machine. Helm does not select native plugins from a multiarchitecture index. Keep the final repository name `bale` when publishing and delivering it.
@@ -61,10 +58,10 @@ bale push release:v1 mirror.example.com/release:bundle --delivery bale.delivery.
 On the receiving machine, install into a Helm environment without an existing `bale` plugin:
 
 ```sh
-helm plugin install oci://mirror.example.com/release/plugins/bale:0.0.0-linux-amd64 --verify=false
+helm plugin install oci://mirror.example.com/release/plugins/bale:VERSION_OCI-linux-amd64 --verify=false
 ```
 
-Nix-built packages are unsigned, hence `--verify=false`. Use your verification policy for signed packages.
+Packages are unsigned, hence `--verify=false`. Use your verification policy for signed packages.
 
 ### Render or deploy
 
@@ -90,7 +87,7 @@ export HELM_CONFIG_HOME="$PWD/helm-config"
 export HELM_REGISTRY_CONFIG="$HELM_CONFIG_HOME/registry/config.json"
 helm registry login mirror.example.com --username deploy \
   --password-stdin --ca-file registry-ca.crt < registry-password
-helm plugin install oci://mirror.example.com/release/plugins/bale:0.0.0-linux-amd64 \
+helm plugin install oci://mirror.example.com/release/plugins/bale:VERSION_OCI-linux-amd64 \
   --verify=false --ca-file registry-ca.crt
 helm bale upgrade web oci://mirror.example.com/release/charts/web:1.4 \
   --install --namespace production --create-namespace --wait --ca-file registry-ca.crt

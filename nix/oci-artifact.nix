@@ -48,6 +48,7 @@ runCommand name
     oras push --no-tty --oci-layout "$out:${imageTag}" \
       --image-spec v1.1 \
       --annotation org.opencontainers.image.created=1970-01-01T00:00:01Z \
+      --annotation org.opencontainers.image.source=https://github.com/strio-dev/bale \
       --artifact-type ${lib.escapeShellArg artifactType} \
       ${lib.escapeShellArgs (map (layer: "${layer.title}:${layer.mediaType}") payloads)}
     python3 ${../tests/packaging/oci_artifact.py} "$out" ${expected}

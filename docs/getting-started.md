@@ -29,10 +29,10 @@ See [how bundles work](concepts/bundles.md) for the capture and delivery lifecyc
 
 ### Install a specific version
 
-Pass a published tag from [GitHub releases](https://github.com/strio-dev/bale/releases), replacing `VERSION` below:
+Pass the exact tag from [GitHub releases](https://github.com/strio-dev/bale/releases), including its `v` prefix when present, as `TAG`:
 
 ```sh
-curl -fsSL https://bale.strio.dev/install.sh | sh -s -- VERSION
+curl -fsSL https://bale.strio.dev/install.sh | sh -s -- TAG
 ```
 
 The installer verifies checksums and installs under `/usr/local`, using `sudo` when needed. To use a writable directory instead:

@@ -8,7 +8,7 @@ Use the Bale image with Podman or Docker to capture and deliver bundles. The ima
 podman run --rm ghcr.io/strio-dev/bale:latest --help
 ```
 
-Replace `latest` with a published release tag to pin a version. Stable releases update `latest`; prereleases keep versioned tags. Replace `+` with `_` in image tags containing build metadata.
+Replace `latest` with a release version to pin it: Git tag `v1.2.3` uses image tag `1.2.3`. Stable releases update `latest`; prereleases keep versioned tags. Replace `+` with `_` in image tags containing build metadata.
 
 ## Capture a bundle
 

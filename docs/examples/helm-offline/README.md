@@ -4,7 +4,7 @@ Carry a chart, its default images, a custom image and both Bale Helm plugins to 
 
 ## Prepare the recipe
 
-Use the released [discovery plugin](../../helm.md#publish-and-configure-discovery) and [native Helm plugin](../../helm.md#package-and-transfer). Copy [bale.yaml](bale.yaml) into a working directory, choose your chart and custom image, and replace `VERSION_OCI` with a released tag (`+` becomes `_`). The native tag selects Linux AMD64; use a package matching your deployment machine.
+Use the released [discovery plugin](../../helm.md#publish-and-configure-discovery) and [native Helm plugin](../../helm.md#package-and-transfer). Copy [bale.yaml](bale.yaml) into a working directory, choose your chart and custom image, and replace `VERSION_OCI` with a release version (drop the leading `v`; replace `+` with `_`). The native tag selects Linux AMD64; use a package matching your deployment machine.
 
 Discovery renders chart defaults with release `web`, namespace `apps` and context `production`. All declared subcharts must already be packaged in the chart. Hooks are inspected, never executed during capture. The custom image is an ordinary explicit include for a later deployment override.
 

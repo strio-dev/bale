@@ -6,7 +6,7 @@ Capture needs Bale and registry access. Deployment needs Helm 4 and the native B
 
 ## Publish and configure discovery
 
-Tagged releases publish the discovery package below. Replace `VERSION_OCI` with a release tag, encoding `+` as `_`, and select your chart in `bale.yaml`. For custom registries, [build and publish](development/releases.md#publish-artifacts) your own package.
+Tagged releases publish the discovery package below. Replace `VERSION_OCI` with a release version, dropping the leading `v` and encoding `+` as `_`, and select your chart in `bale.yaml`. For custom registries, [build and publish](development/releases.md#publish-artifacts) your own package.
 
 ```yaml
 include:

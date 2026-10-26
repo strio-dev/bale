@@ -47,7 +47,9 @@ OCI publication uses ORAS copy options, including `--to-registry-config` and `--
 
 ## Release a version
 
-After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1`. CI publishes Linux AMD64/ARM64 CLI archives and `SHA256SUMS` on GitHub, plus the complete OCI distribution:
+After checks pass, push a `v`-prefixed tag such as `v1.2.3` or `v1.2.3-rc.1`. The tag names the GitHub release and Go module version. Download URLs keep the full tag, such as `/releases/download/v1.2.3/bale-linux-amd64.tar.gz`.
+
+CI publishes Linux AMD64/ARM64 CLI archives and `SHA256SUMS` on GitHub, plus the complete OCI distribution:
 
 | Artifact | Published reference |
 | --- | --- |
@@ -57,6 +59,6 @@ After checks pass, push an unprefixed version tag such as `1.2.3` or `1.2.3-rc.1
 | Native Helm plugin | `ghcr.io/strio-dev/bale/plugins/bale:VERSION_OCI-linux-ARCH` |
 | Flux bootstrap chart | `oci://ghcr.io/strio-dev/bale/charts/bale-flux` with `--version VERSION` |
 
-`VERSION` is the exact release tag; `VERSION_OCI` replaces `+` with `_`. Both images support AMD64 and ARM64. Native Helm packages use separate `amd64` and `arm64` tags because Helm does not select them from an index. Discovery and the chart publish once per release; chart metadata and binaries retain the exact version.
+`VERSION` is the release tag without its leading `v`; `VERSION_OCI` also replaces `+` with `_`. Binaries and Helm chart metadata use `VERSION`, including any `+` build metadata. Both images support AMD64 and ARM64. Native Helm packages use separate `amd64` and `arm64` tags because Helm does not select them from an index. Discovery and the chart publish once per release.
 
 CI publishes the GitHub release after the OCI artifacts succeed. Only stable releases update image `latest` aliases. Reruns preserve published version tags and keep older releases from replacing the current `latest` images. The publishing command above remains available for custom registries.

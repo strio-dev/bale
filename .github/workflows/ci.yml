@@ -3,11 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
-    # Native globs select unprefixed version-shaped tags, not strict SemVer.
+    # Native globs select v-prefixed version-shaped tags, not strict SemVer.
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+-*'
-      - '[0-9]+.[0-9]+.[0-9]+\+*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+\+*'
       # Release tags do not use underscores.
       - '!**_*'
   pull_request:
@@ -35,6 +35,7 @@ jobs:
       docs: ${{ steps.matrix.outputs.docs }}
       native: ${{ steps.matrix.outputs.native }}
       acceptance: ${{ steps.matrix.outputs.acceptance }}
+      version: ${{ steps.release.outputs.version }}
       published: ${{ steps.release.outputs.published }}
       prerelease: ${{ steps.release.outputs.prerelease }}
       image: ${{ steps.release.outputs.image }}
@@ -68,16 +69,18 @@ jobs:
         with:
           script: |
             const tag = process.env.GITHUB_REF_NAME;
+            const version = tag.slice(1);
             let release;
             try {
               ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
             } catch (error) {
               if (error.status !== 404) throw error;
             }
+            core.setOutput('version', version);
             core.setOutput('published', Boolean(release && !release.draft));
-            core.setOutput('prerelease', tag.split('+', 1)[0].includes('-'));
+            core.setOutput('prerelease', version.split('+', 1)[0].includes('-'));
             core.setOutput('image', `ghcr.io/${context.repo.owner}/${context.repo.repo}`.toLowerCase());
-            core.setOutput('image-tag', tag.replaceAll('+', '_'));
+            core.setOutput('image-tag', version.replaceAll('+', '_'));
 
   quality:
     name: Quality checks
@@ -136,7 +139,9 @@ jobs:
       - &release-version
         name: Set release version
         if: github.event_name == 'push' && github.ref_type == 'tag'
-        run: printf '%s\n' "$GITHUB_REF_NAME" > nix/release-version
+        env:
+          RELEASE_VERSION: ${{ needs.matrix.outputs.version }}
+        run: printf '%s\n' "$RELEASE_VERSION" > nix/release-version
       - *nix
       - *nix-cache
       - *check

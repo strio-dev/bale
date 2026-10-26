@@ -39,7 +39,7 @@ else:
     if "-w" in sys.argv:
         print(os.environ["TEST_LATEST"], end="")
     else:
-        if "/download/1.2.3/" not in url:
+        if "/download/" + os.environ["TEST_TAG"] + "/" not in url:
             sys.exit(22)
         if os.environ.get("TEST_DOWNLOAD_FAIL") in ("all", url.rsplit("/", 1)[1]):
             sys.exit(22)
@@ -68,6 +68,7 @@ class InstallerTests(unittest.TestCase):
             "TEST_OS": "Linux",
             "TEST_ARCH": "x86_64",
             "TEST_LATEST": f"{RELEASES}/tag/1.2.3",
+            "TEST_TAG": "1.2.3",
             "TEST_ASSETS": str(self.root / "assets"),
             "TEST_REQUESTS": str(self.root / "requests"),
             "TEST_UID": "1000",
@@ -122,6 +123,25 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Usage: sh install.sh [VERSION]", result.stdout)
         self.assertFalse((self.root / "requests").exists())
         self.assertEqual(list((self.root / "system").iterdir()), [])
+
+    def test_prefixed_release_download_urls(self):
+        for tag, args in (
+            ("v1.2.3", ()),
+            ("v1.2.3", ("v1.2.3",)),
+            ("v1.2.3-rc.1", ("v1.2.3-rc.1",)),
+            ("v1.2.3+build.1", ("v1.2.3+build.1",)),
+        ):
+            with self.subTest(tag=tag, args=args):
+                self.env.update(TEST_TAG=tag, TEST_LATEST=f"{RELEASES}/tag/{tag}")
+                (self.root / "requests").unlink(missing_ok=True)
+                self.run_installer(*args)
+                expected = [
+                    f"{RELEASES}/download/{tag}/bale-linux-amd64.tar.gz",
+                    f"{RELEASES}/download/{tag}/SHA256SUMS",
+                ]
+                if not args:
+                    expected.insert(0, f"{RELEASES}/latest")
+                self.assertEqual((self.root / "requests").read_text().splitlines(), expected)
 
     def test_corrupt_archive_with_valid_checksum(self):
         asset = self.root / "assets/bale-linux-amd64.tar.gz"

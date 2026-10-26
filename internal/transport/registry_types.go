@@ -6,7 +6,6 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 )
 
@@ -19,7 +18,8 @@ type RepositoryFactory func(context.Context, string) (RegistryRepository, error)
 // Push publishes bytes; Bale maintains and verifies fallback referrer indexes.
 // Implement registry.TagLister as well to support all-tags selection.
 type RegistryRepository interface {
-	oras.Target
+	content.Storage
+	content.TagResolver
 	Blobs() RegistryBlobStore
 
 	// ReferrerPages enumerates raw native Referrers API indexes for all artifact

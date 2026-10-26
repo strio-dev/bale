@@ -9,7 +9,6 @@ import (
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/bundle"
-	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
@@ -25,7 +24,12 @@ type registryRepository struct {
 	backend          RegistryRepository
 }
 
-func (r *registryRepository) target() oras.Target {
+type registryTarget interface {
+	content.Storage
+	content.TagResolver
+}
+
+func (r *registryRepository) target() registryTarget {
 	if r.remote != nil {
 		return r.remote
 	}

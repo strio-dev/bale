@@ -47,7 +47,7 @@ func (c *dependencyCapture) inventory(ctx context.Context, repo string, subject 
 	if refs, ok := c.inventories[key]; ok {
 		return refs, nil
 	}
-	provider, err := c.graph.provider(repo)
+	provider, err := c.graph.provider(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (c *dependencyCapture) declarations(ctx context.Context, repo string, subje
 	if err != nil {
 		return nil, err
 	}
-	store, err := c.graph.store(repo)
+	store, err := c.graph.store(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (c *dependencyCapture) resolve(ctx context.Context, reference string) (stri
 	if d, ok := c.resolved[key]; ok {
 		return repo, d, nil
 	}
-	store, err := c.graph.service.repository(repo)
+	store, err := c.graph.service.repository(ctx, repo)
 	if err != nil {
 		return "", v1.Descriptor{}, err
 	}
@@ -161,7 +161,7 @@ func (c *dependencyCapture) cacheDeclaration(ctx context.Context, repo string, d
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return err
 	}
-	store, err := c.graph.store(repo)
+	store, err := c.graph.store(ctx, repo)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func (c *dependencyCapture) expand(ctx context.Context, repo string, subject v1.
 	}
 	if env.ArtifactType == bundle.BundleArtifactType {
 		// Its existing capture owns the members and their locked observations.
-		store, err := c.graph.store(repo)
+		store, err := c.graph.store(ctx, repo)
 		if err != nil {
 			return err
 		}

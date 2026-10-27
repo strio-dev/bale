@@ -87,9 +87,9 @@ func (s *Service) InspectDestinationsWithOptions(ctx context.Context, subjectRef
 	fail := func(kind, err error) ([]InspectedDestination, error) {
 		return nil, operationError("inspect destinations", root.Repository, root.Descriptor, kind, err)
 	}
-	repo, err := s.repository(root.Repository)
+	repo, err := s.repository(ctx, root.Repository)
 	if err != nil {
-		return fail(ErrInvalid, err)
+		return fail(nil, err)
 	}
 	metadataCtx := context.WithValue(ctx, dependencyMetadataLimitKey{}, destination.MaxBytes)
 	refs, err := listPinnedReferrers(metadataCtx, repo, root.Descriptor, ListReferrersOptions{})

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -151,7 +152,7 @@ func TestPullManifestLayersPreservesFullOfflineClosure(t *testing.T) {
 func TestCopyAndRemoteVerificationTraverseManifestLayers(t *testing.T) {
 	r, repository, service, rejected := manifestLayerRegistry(t)
 	root, _ := manifestLayerFixture(t, r)
-	remote, err := service.repository(repository)
+	remote, err := service.repository(context.Background(), repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestCopyAndRemoteVerificationTraverseManifestLayers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote, err = destinationService.repository(host + "/test/artifacts")
+	remote, err = destinationService.repository(context.Background(), host+"/test/artifacts")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +247,7 @@ func TestInlineManifestLayerMaterializesWithoutSourceManifest(t *testing.T) {
 	root = put(t, r.store, v1.MediaTypeImageManifest, raw)
 	r.tags["stable"] = root
 	delete(r.store.descriptors, index.Digest.String())
-	remote, err := service.repository(repository)
+	remote, err := service.repository(context.Background(), repository)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/deliveryfile"
 	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
 )
 
@@ -434,7 +436,7 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 		}
 	}
 	for _, entry := range plan.Repositories {
-		repo, err := s.repository(entry.Repository)
+		repo, err := s.repository(ctx, entry.Repository)
 		if err != nil {
 			return result, err
 		}
@@ -454,9 +456,9 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 		}
 	}
 	// Re-pushing an unchanged selected referrer repairs a missing standard
-	// fallback inventory on a retry, while ORAS handles native API discovery.
+	// fallback inventory on a retry.
 	for _, a := range plan.Referrers {
-		target, err := s.repository(a.Repository)
+		target, err := s.repository(ctx, a.Repository)
 		if err != nil {
 			return result, err
 		}
@@ -464,10 +466,13 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 		if err != nil {
 			return result, err
 		}
-		if err := target.Push(ctx, a.Descriptor, bytes.NewReader(raw)); err != nil {
+		if err := target.Push(ctx, a.Descriptor, bytes.NewReader(raw)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
 			return result, err
+		} else if err != nil {
+			result.Stats.ObjectsSkipped++
+		} else {
+			result.Stats.ManifestBytesUploaded += int64(len(raw))
 		}
-		result.Stats.ManifestBytesUploaded += int64(len(raw))
 		refs, err := listPinnedReferrers(ctx, target, a.Subject, ListReferrersOptions{})
 		if err != nil {
 			return result, err
@@ -477,7 +482,7 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 			return result, fmt.Errorf("%w: destination referrer %s is not discoverable beside %s", ErrIntegrity, a.Descriptor.Digest, a.Subject.Digest)
 		}
 	}
-	repo, err := s.repository(completion.Repository)
+	repo, err := s.repository(ctx, completion.Repository)
 	if err != nil {
 		return result, err
 	}
@@ -509,7 +514,7 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 		}
 	}
 	for _, tag := range plan.Tags {
-		target, err := s.repository(tag.Repository)
+		target, err := s.repository(ctx, tag.Repository)
 		if err != nil {
 			return result, err
 		}

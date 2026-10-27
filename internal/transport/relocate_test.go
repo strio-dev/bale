@@ -148,7 +148,7 @@ func TestDirectPlanRequiredReferrerChecksActualSubject(t *testing.T) {
 	subject := object(t, source.store, "subject")
 	other := object(t, source.store, "other")
 	ref := refIndex(t, source, other, nil)
-	remote, err := service.repository(name)
+	remote, err := service.repository(context.Background(), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestDirectDefaultPolicyUsesStoreReferrerCapability(t *testing.T) {
 	subject := object(t, source.store, "subject")
 	dependency := object(t, source.store, "dependency")
 	ref := refIndex(t, source, subject, []v1.Descriptor{dependency})
-	remote, err := service.repository(name)
+	remote, err := service.repository(context.Background(), name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestDirectPolicyNormalizationDeduplicatesAndValidatesBeforeReads(t *testing
 	source, name, service := testRegistry(t)
 	subject := object(t, source.store, "subject")
 	ref := refIndex(t, source, subject, []v1.Descriptor{})
-	remote, err := service.repository(name)
+	remote, err := service.repository(context.Background(), name)
 	if err != nil {
 		t.Fatal(err)
 	}

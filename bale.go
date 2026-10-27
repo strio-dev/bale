@@ -29,6 +29,10 @@ type (
 	DependencyResolution         = bundle.DependencyResolution
 	ResolvedDependency           = bundle.ResolvedDependency
 	ClientOptions                = transport.Options
+	RepositoryFactory            = transport.RepositoryFactory
+	RegistryRepository           = transport.RegistryRepository
+	RegistryBlobStore            = transport.RegistryBlobStore
+	ReferrerPage                 = transport.ReferrerPage
 	PluginRequest                = transport.PluginRequest
 	PluginRunner                 = transport.PluginRunner
 	PullOptions                  = transport.PullOptions

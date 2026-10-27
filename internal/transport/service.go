@@ -32,6 +32,7 @@ type PluginRequest struct {
 type PluginRunner func(context.Context, PluginRequest) (dependency.Declaration, error)
 
 type Options struct {
+	RepositoryFactory   RepositoryFactory
 	PluginRunner        PluginRunner
 	PlainHTTPRegistries []string
 	HTTPClient          *http.Client
@@ -39,12 +40,13 @@ type Options struct {
 	OnProgress          func(Progress)
 }
 type Service struct {
-	pluginRunner PluginRunner
-	httpHosts    map[string]bool
-	client       *auth.Client
-	onProgress   func(Progress)
-	progressMu   sync.Mutex
-	publishGate  chan struct{}
+	pluginRunner      PluginRunner
+	repositoryFactory RepositoryFactory
+	httpHosts         map[string]bool
+	client            *auth.Client
+	onProgress        func(Progress)
+	progressMu        sync.Mutex
+	publishGate       chan struct{}
 }
 
 // Stats accounts for graph capture and copy operations, not total HTTP traffic.
@@ -146,7 +148,7 @@ func NewService(opts Options) (*Service, error) {
 	if client == nil {
 		client = auth.DefaultClient.Client
 	}
-	s := &Service{pluginRunner: opts.PluginRunner, httpHosts: map[string]bool{}, client: &auth.Client{Client: client, Cache: auth.NewCache(), Credential: opts.Credentials}, onProgress: opts.OnProgress, publishGate: make(chan struct{}, 1)}
+	s := &Service{pluginRunner: opts.PluginRunner, repositoryFactory: opts.RepositoryFactory, httpHosts: map[string]bool{}, client: &auth.Client{Client: client, Cache: auth.NewCache(), Credential: opts.Credentials}, onProgress: opts.OnProgress, publishGate: make(chan struct{}, 1)}
 	for _, host := range opts.PlainHTTPRegistries {
 		ref, err := registry.ParseReference(host + "/bale")
 		if err != nil || ref.Registry != host {
@@ -177,16 +179,39 @@ func (s *Service) acquirePublication(ctx context.Context) error {
 
 func (s *Service) releasePublication() { <-s.publishGate }
 
-func (s *Service) repository(name string) (*remote.Repository, error) {
+func (s *Service) repository(ctx context.Context, name string) (*registryRepository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.repositoryFactory != nil {
+		ref, err := registry.ParseReference(name)
+		if err != nil {
+			return nil, fmt.Errorf("%w: repository %q: %w", ErrInvalid, name, err)
+		}
+		if ref.Reference != "" || repositoryName(ref) != name {
+			return nil, fmt.Errorf("%w: repository factory requires a canonical repository name", ErrInvalid)
+		}
+		backend, err := s.repositoryFactory(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if backend == nil || backend.Blobs() == nil {
+			return nil, fmt.Errorf("%w: caller-owned repository and blob store must be provided", ErrInvalid)
+		}
+		return &registryRepository{Reference: ref, backend: backend}, nil
+	}
 	r, err := remote.NewRepository(name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: repository %q: %w", ErrInvalid, name, err)
 	}
 	r.PlainHTTP = s.httpHosts[r.Reference.Registry]
 	r.Client = inventoryValidationClient{Client: s.client}
 	// Updating standard referrer inventories must not delete existing manifests.
 	r.SkipReferrersGC = true
-	return r, nil
+	return &registryRepository{Reference: r.Reference, MaxMetadataBytes: r.MaxMetadataBytes, remote: r}, nil
 }
 func parseRef(value string) (registry.Reference, error) {
 	r, err := registry.ParseReference(value)
@@ -210,7 +235,7 @@ func completionRef(value string) (registry.Reference, error) {
 	return r, nil
 }
 func (s *Service) checkTag(ctx context.Context, t Tag) error {
-	r, err := s.repository(t.Repository)
+	r, err := s.repository(ctx, t.Repository)
 	if err != nil {
 		return err
 	}

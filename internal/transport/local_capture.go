@@ -364,7 +364,7 @@ func (s captureSource) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadClose
 	if !ok {
 		return nil, fmt.Errorf("%w: missing local capture metadata %s", ErrNotFound, d.Digest)
 	}
-	repo, err := s.service.repository(repository)
+	repo, err := s.service.repository(ctx, repository)
 	if err != nil {
 		return nil, err
 	}

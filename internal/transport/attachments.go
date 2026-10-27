@@ -12,7 +12,6 @@ import (
 	"github.com/strio-dev/bale/internal/bundle"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 // AttachRequest supplies a prepared OCI manifest or index with a subject. Store
@@ -106,9 +105,9 @@ func (s *Service) attachPinned(ctx context.Context, request AttachRequest, repos
 	if err := s.preflightManagedTags(ctx, request.Store, targets, nil); err != nil {
 		return fail(nil, err)
 	}
-	repo, err := s.repository(result.Repository)
+	repo, err := s.repository(ctx, result.Repository)
 	if err != nil {
-		return fail(ErrInvalid, err)
+		return fail(nil, err)
 	}
 	if err := copyGraph(ctx, request.Store, repo, request.Descriptor, &result.Stats, nil); err != nil {
 		// A manifest PUT can succeed before its fallback inventory update fails.
@@ -161,15 +160,15 @@ func (s *Service) ListReferrers(ctx context.Context, subjectReference string, op
 	if err != nil {
 		return nil, operationError("list referrers", subjectReference, v1.Descriptor{}, nil, err)
 	}
-	repo, err := s.repository(root.Repository)
+	repo, err := s.repository(ctx, root.Repository)
 	if err != nil {
-		return nil, operationError("list referrers", root.Repository, root.Descriptor, ErrInvalid, err)
+		return nil, operationError("list referrers", root.Repository, root.Descriptor, nil, err)
 	}
 	refs, err := listPinnedReferrers(ctx, repo, root.Descriptor, options)
 	return refs, operationError("list referrers", root.Repository, root.Descriptor, nil, err)
 }
 
-func listPinnedReferrers(ctx context.Context, repo *remote.Repository, subject v1.Descriptor, options ListReferrersOptions) ([]v1.Descriptor, error) {
+func listPinnedReferrers(ctx context.Context, repo *registryRepository, subject v1.Descriptor, options ListReferrersOptions) ([]v1.Descriptor, error) {
 	// Keep the repository's learned or explicitly configured ORAS capability
 	// state. Only inventory requests receive the validation marker; the actual
 	// referrer Resolve/Fetch operations below retain the original context.
@@ -260,8 +259,8 @@ type attachmentSource struct{ content.ReadOnlyStorage }
 
 func (s attachmentSource) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadCloser, error) {
 	r, err := s.ReadOnlyStorage.Fetch(ctx, d)
-	if repo, ok := s.ReadOnlyStorage.(*remote.Repository); ok && errors.Is(err, errdef.ErrNotFound) && bundle.IsEnvelope(d.MediaType) {
-		r, err = repo.Blobs().Fetch(ctx, d)
+	if blobs, ok := registryBlobs(s.ReadOnlyStorage); ok && errors.Is(err, errdef.ErrNotFound) && bundle.IsEnvelope(d.MediaType) {
+		r, err = blobs.Fetch(ctx, d)
 	}
 	if err != nil {
 		return nil, &attachmentSourceError{err}
@@ -285,9 +284,9 @@ func (r attachmentReader) Close() error {
 	return nil
 }
 
-// validatedRegistryReferrers is installed only for repositories created by
-// Service, whose HTTP client supports request-scoped inventory validation.
-type validatedRegistryReferrers struct{ repo *remote.Repository }
+// validatedRegistryReferrers is installed only for Service repositories, which
+// validate raw ORAS or caller-owned inventories before exposing candidates.
+type validatedRegistryReferrers struct{ repo *registryRepository }
 
 func (r validatedRegistryReferrers) Referrers(ctx context.Context, subject v1.Descriptor, artifactType string, fn func([]v1.Descriptor) error) error {
 	refs, err := listPinnedReferrers(ctx, r.repo, subject, ListReferrersOptions{ArtifactType: artifactType})

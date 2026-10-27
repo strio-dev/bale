@@ -17,7 +17,6 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
 )
 
 type graph struct {
@@ -71,7 +70,7 @@ func (s *Service) capture(ctx context.Context, recipe config.Recipe) (*graph, bu
 			repo = input.Repository
 			refs = append([]string{}, (*input.Tags)...)
 			if len(refs) == 0 {
-				r, err := s.repository(repo)
+				r, err := s.repository(ctx, repo)
 				if err != nil {
 					return fail(err)
 				}
@@ -90,7 +89,7 @@ func (s *Service) capture(ctx context.Context, recipe config.Recipe) (*graph, bu
 				}
 			}
 		}
-		r, err := s.repository(repo)
+		r, err := s.repository(ctx, repo)
 		if err != nil {
 			return fail(err)
 		}
@@ -162,7 +161,7 @@ func (g *graph) captureRoot(ctx context.Context, root bundle.Root) error {
 		return err
 	}
 	for _, req := range policy.Require {
-		r, err := g.service.repository(root.Repository)
+		r, err := g.service.repository(ctx, root.Repository)
 		if err != nil {
 			return err
 		}
@@ -193,7 +192,7 @@ func (g *graph) visit(ctx context.Context, repo string, d v1.Descriptor, discove
 			g.nodes[d.Digest] = d
 		}
 		g.source[d.Digest] = repo
-		r, err := g.store(repo)
+		r, err := g.store(ctx, repo)
 		if err != nil {
 			return err
 		}
@@ -276,7 +275,7 @@ func (g *graph) visit(ctx context.Context, repo string, d v1.Descriptor, discove
 			}
 			return nil
 		}
-		provider, err := g.provider(repo)
+		provider, err := g.provider(ctx, repo)
 		if err != nil {
 			return err
 		}
@@ -295,7 +294,7 @@ func (g *graph) referrer(ctx context.Context, repo string, subject, d v1.Descrip
 	if !bundle.IsEnvelope(d.MediaType) {
 		return fmt.Errorf("%w: referrer %s has unsupported envelope %s", ErrUnsupported, d.Digest, d.MediaType)
 	}
-	r, err := g.store(repo)
+	r, err := g.store(ctx, repo)
 	if err != nil {
 		return err
 	}
@@ -344,8 +343,8 @@ func (g *graph) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadCloser, erro
 	}
 	var err error
 	var rc io.ReadCloser
-	if remoteStore, remote := r.(*remote.Repository); remote {
-		rc, err = remoteStore.Blobs().Fetch(ctx, d)
+	if blobs, remote := registryBlobs(r); remote {
+		rc, err = blobs.Fetch(ctx, d)
 	} else {
 		rc, err = r.Fetch(ctx, d)
 	}
@@ -360,11 +359,11 @@ var _ content.Fetcher = (*graph)(nil)
 func newGraph(s *Service) *graph {
 	return &graph{service: s, data: newMetadataStore(), nodes: map[digest.Digest]v1.Descriptor{}, source: map[digest.Digest]string{}, visited: map[string]bool{}, discovered: map[string]bool{}, origins: map[string]bool{}, stores: map[string]content.ReadOnlyStorage{}, referrers: map[string]registry.ReferrerLister{}, payloads: map[digest.Digest]content.ReadOnlyStorage{}, stats: Stats{Accounting: statsAccounting}, meta: bundle.Metadata{SchemaVersion: 1, Roots: []bundle.Root{}, Origins: []bundle.Origin{}, Referrers: []bundle.Association{}}}
 }
-func (g *graph) store(repo string) (content.ReadOnlyStorage, error) {
+func (g *graph) store(ctx context.Context, repo string) (content.ReadOnlyStorage, error) {
 	source := g.stores[repo]
 	if source == nil {
 		var err error
-		source, err = g.service.repository(repo)
+		source, err = g.service.repository(ctx, repo)
 		if err != nil {
 			return nil, err
 		}
@@ -374,14 +373,14 @@ func (g *graph) store(repo string) (content.ReadOnlyStorage, error) {
 	}
 	return source, nil
 }
-func (g *graph) provider(repo string) (registry.ReferrerLister, error) {
+func (g *graph) provider(ctx context.Context, repo string) (registry.ReferrerLister, error) {
 	if _, ok := g.stores[repo]; ok {
 		if provider := g.referrers[repo]; provider != nil {
 			return provider, nil
 		}
 		return nil, fmt.Errorf("%w: source %s cannot discover referrers", ErrUnsupported, repo)
 	}
-	r, err := g.service.repository(repo)
+	r, err := g.service.repository(ctx, repo)
 	if err != nil {
 		return nil, err
 	}

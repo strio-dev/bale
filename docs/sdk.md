@@ -107,6 +107,18 @@ The default referrer policy is `all` and requires `ReferrerSource`; `Resolve` su
 
 Direct `Plan`/`Execute` follows the immutable OCI graph and selected referrers, without resolving references inside dependency declarations. Use bundle creation to capture those dependencies. Bundle push also generates [destination records](destinations.md).
 
+### Caller-owned registry access
+
+Set `ClientOptions.RepositoryFactory` to retain an existing registry backend's authentication, certificate handling and network policy. Bale calls the factory with a context and canonical `registry/repository` name for resolution, capture and publication. Factory errors propagate; the client does not silently switch transports. The caller owns backend lifetimes.
+
+Return a `bale.RegistryRepository`: an `oras.Target`, a separate `Blobs()` store, and `ReferrerPages`. Blob operations remain separate even when a layer contains OCI manifest bytes. Blob `Resolve` must report the actual digest and size. Implement ORAS's `registry.TagLister` as well when all-tags selection is needed.
+
+`ReferrerPages` supplies raw native API indexes for every artifact type. Its `ReferrerPage` contains media type, optional digest, size (`-1` when unknown) and a callback-scoped reader. The backend handles requests and pagination and closes readers; Bale bounds and validates pages and their referenced envelopes before filtering.
+
+A fallback-only backend explicitly returns `errdef.ErrUnsupported` from `ReferrerPages`. Bale then validates, preserves and updates the standard fallback inventory. That capability cannot discover native-only referrers. Authentication, network, cancellation and malformed-response errors must propagate instead of becoming `ErrUnsupported`.
+
+Bale keeps graph validation, inventory repair, publication coordination and `Published`/`Discoverable` results. It does not delete previous fallback inventories. Without a factory, the client retains its default ORAS transport and native/fallback discovery.
+
 ## Author dependency declarations
 
 ```go

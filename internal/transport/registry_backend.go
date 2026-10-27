@@ -54,12 +54,18 @@ func (r *registryRepository) Fetch(ctx context.Context, expected v1.Descriptor) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !bundle.IsEnvelope(expected.MediaType) {
+		return r.Blobs().Fetch(ctx, expected)
+	}
 	return r.target().Fetch(ctx, expected)
 }
 
 func (r *registryRepository) Exists(ctx context.Context, expected v1.Descriptor) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if !bundle.IsEnvelope(expected.MediaType) {
+		return r.Blobs().Exists(ctx, expected)
 	}
 	return r.target().Exists(ctx, expected)
 }

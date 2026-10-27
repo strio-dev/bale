@@ -18,12 +18,13 @@ import (
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/config"
 	"github.com/strio-dev/bale/internal/dependency"
+	"github.com/strio-dev/bale/internal/destination"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 )
 
-// This backend exposes content operations only. Its manifest and blob namespaces
-// are physically separate, and it does not index subjects during publication.
+// This backend's repository operations access manifests only. Blobs() exposes a
+// physically separate namespace; the backend does not index subjects on push.
 type opaqueRegistryCAS struct {
 	mu      sync.Mutex
 	objects map[digest.Digest][]byte
@@ -103,23 +104,9 @@ func newOpaqueRegistry() *opaqueRegistry {
 
 func (r *opaqueRegistry) Blobs() RegistryBlobStore { return r.blobs }
 
-func (r *opaqueRegistry) Fetch(ctx context.Context, d v1.Descriptor) (io.ReadCloser, error) {
-	if !bundle.IsEnvelope(d.MediaType) {
-		return r.blobs.Fetch(ctx, d)
-	}
-	return r.opaqueRegistryCAS.Fetch(ctx, d)
-}
-
-func (r *opaqueRegistry) Exists(ctx context.Context, d v1.Descriptor) (bool, error) {
-	if !bundle.IsEnvelope(d.MediaType) {
-		return r.blobs.Exists(ctx, d)
-	}
-	return r.opaqueRegistryCAS.Exists(ctx, d)
-}
-
 func (r *opaqueRegistry) Push(ctx context.Context, d v1.Descriptor, reader io.Reader) error {
 	if !bundle.IsEnvelope(d.MediaType) {
-		return r.blobs.Push(ctx, d, reader)
+		return fmt.Errorf("repository accepts manifests only: %w", errdef.ErrUnsupported)
 	}
 	raw, err := content.ReadAll(reader, d)
 	if err != nil {
@@ -294,6 +281,76 @@ func TestRegistryBackendAttachPinsSubjectAndPreservesFallback(t *testing.T) {
 	refs, err := s.ListReferrers(t.Context(), request.Subject, ListReferrersOptions{})
 	if err != nil || len(refs) != 2 {
 		t.Fatalf("discovery=%+v err=%v", refs, err)
+	}
+}
+
+func TestRegistryBackendResolvedStoreReadsPayloadsFromBlobNamespace(t *testing.T) {
+	const name = "opaque.invalid/components/tool"
+	r := newOpaqueRegistry()
+	subject := opaqueObject(t, r, "payload")
+	blob := content.NewDescriptorFromBytes("application/example", []byte("payload"))
+	if exists, err := r.Exists(t.Context(), blob); err != nil || exists {
+		t.Fatalf("payload unexpectedly available in manifest namespace: exists=%v err=%v", exists, err)
+	}
+	s := opaqueService(t, map[string]RegistryRepository{name: r})
+	root, err := s.Resolve(t.Context(), name+"@"+subject.Digest.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exists, err := root.Store.Exists(t.Context(), blob)
+	if err != nil || !exists {
+		t.Fatalf("resolved store cannot find payload blob: exists=%v err=%v", exists, err)
+	}
+	raw, err := content.FetchAll(t.Context(), root.Store, blob)
+	if err != nil || string(raw) != "payload" {
+		t.Fatalf("resolved store cannot read payload blob: raw=%q err=%v", raw, err)
+	}
+}
+
+func TestRegistryBackendInspectsDependencyPayloadsFromBlobNamespace(t *testing.T) {
+	const name = "opaque.invalid/components/tool"
+	r := newOpaqueRegistry()
+	subject := opaqueObject(t, r, "subject")
+	s := opaqueService(t, map[string]RegistryRepository{name: r})
+	request := opaqueDeclaration(t, name, subject)
+	if _, err := s.Attach(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := s.InspectDependencies(t.Context(), request.Subject)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("inspect dependency attachment payload: declarations=%+v err=%v", declarations, err)
+	}
+	declaration := declarations[0]
+	if !content.Equal(declaration.Descriptor, request.Descriptor) || !content.Equal(declaration.Subject, subject) || len(declaration.Declaration.Dependencies) != 1 || declaration.Declaration.Dependencies[0].Ref != "dependencies.invalid/base:stable" {
+		t.Fatalf("dependency inspection changed the captured declaration: %+v", declaration)
+	}
+}
+
+func TestRegistryBackendInspectsDestinationPayloadsFromBlobNamespace(t *testing.T) {
+	const name = "opaque.invalid/delivered/tool"
+	r := newOpaqueRegistry()
+	subject := opaqueObject(t, r, "subject")
+	record := destination.Record{
+		SchemaVersion: destination.Version,
+		Bundle:        "unavailable.invalid/bundles@" + digest.FromString("bundle").String(),
+		Source:        "unavailable.invalid/components/tool@" + subject.Digest.String(),
+		Destination:   name + "@" + subject.Digest.String(),
+		Resolutions:   []destination.Resolution{},
+	}
+	descriptor, store, err := destination.Prepare(t.Context(), subject, record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := opaqueService(t, map[string]RegistryRepository{name: r})
+	if _, err := s.Attach(t.Context(), AttachRequest{Subject: record.Destination, Descriptor: descriptor, Store: store}); err != nil {
+		t.Fatal(err)
+	}
+	records, err := s.InspectDestinations(t.Context(), record.Destination)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("inspect destination attachment payload: records=%+v err=%v", records, err)
+	}
+	if !records[0].Local || !content.Equal(records[0].Descriptor, descriptor) || !content.Equal(records[0].Subject, subject) || records[0].Record.Source != record.Source {
+		t.Fatalf("destination inspection changed the recorded placement: %+v", records[0])
 	}
 }
 

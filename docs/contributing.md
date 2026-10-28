@@ -32,6 +32,7 @@ just check
 | Command | Checks |
 | --- | --- |
 | `just test` | Tests in all Go modules. |
+| `just test-race` | Root module tests with the race detector. |
 | `just vet` / `just lint` | Go static analysis. |
 | `just scan` / `just vuln` | Security and dependency checks. |
 

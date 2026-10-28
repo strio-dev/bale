@@ -21,7 +21,7 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 	blobs, registryDestination := registryBlobs(dst)
 	seen := map[string]bool{}
 	var walk func(v1.Descriptor, bool) error
-	walk = func(d v1.Descriptor, isEnvelope bool) (retErr error) {
+	walk = func(d v1.Descriptor, isEnvelope bool) error {
 		key := visitKey(d, isEnvelope)
 		if seen[key] {
 			return nil
@@ -77,14 +77,14 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 			stats.ManifestBytesUploaded += int64(len(raw))
 			return nil
 		}
-		fetch := func() (io.ReadCloser, error) {
+		fetch := func(fetchCtx context.Context) (io.ReadCloser, error) {
 			if d.Data != nil {
 				return io.NopCloser(bytes.NewReader(d.Data)), nil
 			}
 			if blobs, ok := registryBlobs(src); ok {
-				return blobs.Fetch(ctx, d)
+				return blobs.Fetch(fetchCtx, d)
 			}
-			return src.Fetch(ctx, d)
+			return src.Fetch(fetchCtx, d)
 		}
 		if mounter, destinationRef, ok := registryMount(dst); ok && mountSource != nil {
 			if name := mountSource[d.Digest]; name != "" {
@@ -93,31 +93,26 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 					return err
 				}
 				if ref.Registry == destinationRef.Registry && ref.Repository != destinationRef.Repository {
-					uploaded := false
-					var verified *content.VerifyReader
-					var mountedReader io.ReadCloser
+					var upload *uploadReader
 					err = mounter.Mount(ctx, d, ref.Repository, func() (io.ReadCloser, error) {
-						uploaded = true
-						rc, err := fetch()
-						if err != nil {
-							return nil, err
+						var fetchErr error
+						upload, fetchErr = openUploadReader(ctx, d, fetch)
+						if fetchErr != nil {
+							return nil, fetchErr
 						}
-						mountedReader = rc
-						verified = content.NewVerifyReader(rc, d)
-						return io.NopCloser(verified), nil
+						// ORAS closes this callback reader before Mount returns. The
+						// source must remain open for post-upload verification.
+						return io.NopCloser(upload), nil
 					})
-					if mountedReader != nil {
-						defer func() { retErr = errors.Join(retErr, mountedReader.Close()) }()
-					}
-					if err != nil {
-						return err
-					}
-					if uploaded {
-						if err := verified.Verify(); err != nil {
+					if upload != nil {
+						if err := upload.finish(ctx, err, false); err != nil {
 							return err
 						}
 						stats.BlobBytesUploaded += d.Size
 					} else {
+						if err != nil {
+							return err
+						}
 						if exists, err := remoteBlobExists(ctx, dst, d); err != nil {
 							return err
 						} else if !exists {
@@ -129,28 +124,13 @@ func copyGraph(ctx context.Context, src content.Fetcher, dst content.Storage, ro
 				}
 			}
 		}
-		rc, err := fetch()
+		upload, err := openUploadReader(ctx, d, fetch)
 		if err != nil {
 			return err
 		}
-		defer func() { retErr = errors.Join(retErr, rc.Close()) }()
-		verified := content.NewVerifyReader(rc, d)
-		pushErr := destination.Push(ctx, d, verified)
+		pushErr := destination.Push(ctx, d, upload)
 		alreadyExists := errors.Is(pushErr, errdef.ErrAlreadyExists)
-		if pushErr != nil {
-			if !alreadyExists {
-				return pushErr
-			}
-			// Push may skip its reader when another writer won the same CAS
-			// insertion. Consume the remaining source before verifying it.
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if _, err := io.Copy(io.Discard, verified); err != nil {
-				return err
-			}
-		}
-		if err := errors.Join(verified.Verify(), ctx.Err()); err != nil {
+		if err := upload.finish(ctx, pushErr, alreadyExists); err != nil {
 			return err
 		}
 		if alreadyExists {

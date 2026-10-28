@@ -113,6 +113,8 @@ Set `ClientOptions.RepositoryFactory` to retain an existing registry backend's a
 
 Return a `bale.RegistryRepository`: an `oras.Target`, a separate `Blobs()` store, and `ReferrerPages`. Blob operations remain separate even when a layer contains OCI manifest bytes. Blob `Resolve` must report the actual digest and size. Implement ORAS's `registry.TagLister` as well when all-tags selection is needed.
 
+Blocking content reads must honor the fetch context's cancellation. Bale waits for active upload reads before verifying or closing their source.
+
 `ReferrerPages` supplies raw native API indexes for every artifact type. Its `ReferrerPage` contains media type, optional digest, size (`-1` when unknown) and a callback-scoped reader. The backend handles requests and pagination and closes readers; Bale bounds and validates pages and their referenced envelopes before filtering.
 
 A fallback-only backend explicitly returns `errdef.ErrUnsupported` from `ReferrerPages`. Bale then validates, preserves and updates the standard fallback inventory. That capability cannot discover native-only referrers. Authentication, network, cancellation and malformed-response errors must propagate instead of becoming `ErrUnsupported`.

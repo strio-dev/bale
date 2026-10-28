@@ -4,11 +4,14 @@ Use focused checks while editing, then run `just check`. The test, vet and lint 
 
 Production builds compile and package artifacts. Separate flake checks run each Go module's tests, vet and lint on AMD64 and ARM64. Test-only edits leave production build inputs unchanged.
 
+Root module tests also run with Go's race detector on both architectures. Nix supplies the required C compiler; production binaries remain statically built.
+
 ## Choose a check
 
 | Command | Scope | Requirements |
 | --- | --- | --- |
 | `just test` | Go tests in all three modules. | Linux and Nix. |
+| `just test-race` | Root module tests with the race detector. | Linux and Nix. |
 | `just helm-plugin-check` | Discovery code checks and capture, transfer and reuse. | Linux and Nix. |
 | `just registry-acceptance` | Packaged CLI and consumers against Distribution and Zot. | Linux and Nix. |
 | `just container-acceptance` | Packaged image in rootless Podman. | Linux AMD64 and writable `/dev/kvm`. |

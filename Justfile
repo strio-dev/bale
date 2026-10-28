@@ -4,6 +4,10 @@ set default-list
 test:
     nix run --no-update-lock-file path:.#dev-test
 
+# Run root module tests with the race detector and pinned C compiler.
+test-race:
+    nix run --no-update-lock-file path:.#dev-test-race
+
 # Run Go static analysis in all modules.
 vet:
     nix run --no-update-lock-file path:.#dev-vet

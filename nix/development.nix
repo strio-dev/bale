@@ -8,6 +8,7 @@
   govulncheck,
   nixfmt,
   just,
+  stdenv,
 }:
 let
   modules = [
@@ -87,6 +88,10 @@ in
   inherit formatSource format;
   commands = {
     test = command "test" [ ] (eachModule ''go test ./... "$@"'');
+    test-race = command "test-race" [ stdenv.cc ] ''
+      export CGO_ENABLED=1
+      go test -race ./... "$@"
+    '';
     vet = command "vet" [ ] (eachModule ''go vet ./... "$@"'');
     lint = command "lint" [ golangci-lint ] (eachModule ''golangci-lint run "$@"'');
     vuln = command "vuln" [ govulncheck ] (eachModule ''govulncheck "$@" ./...'');

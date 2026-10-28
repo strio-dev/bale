@@ -60,6 +60,15 @@ in
     go vet ./...
     golangci-lint run
   '' [ pkgs.golangci-lint ];
+  go-race-check =
+    (goCheck "go-race-check" bale ''
+      go test -race ./...
+    '' [ ]).overrideAttrs
+      (old: {
+        env = old.env // {
+          CGO_ENABLED = "1";
+        };
+      });
   helm-plugin-check = goCheck "helm-plugin-check" helm-plugin ''
     go test ./...
     go test -tags=helm_offline ./...

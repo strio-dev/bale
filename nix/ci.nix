@@ -12,6 +12,7 @@ let
   categories = {
     quality.x86_64-linux = lib.getAttrs [
       "go-check"
+      "go-race-check"
       "helm-plugin-check"
       "helm-consumer-check"
       "formatting"
@@ -41,6 +42,7 @@ let
         ]
         ++ lib.optionals (system == "aarch64-linux") [
           "go-check"
+          "go-race-check"
           "helm-plugin-check"
           "helm-consumer-check"
           "helm-plugin-integration"

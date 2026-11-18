@@ -17,6 +17,7 @@ The examples below are function-body excerpts using this client and an existing 
 | --- | --- |
 | `Credentials` | Caller-supplied ORAS credential callback. The default is anonymous; the SDK does not read Docker credential files. |
 | `HTTPClient` | Caller-owned TLS and transport policy. |
+| `AuthenticatedClient` | Caller-owned authenticated request client with a `Do(*http.Request)` method. Use in place of `HTTPClient` and `Credentials`. Bale still validates and discovers registry metadata. |
 | `PlainHTTPRegistries` | Exact registry hosts allowed to use HTTP. |
 | `OnProgress` | Synchronous, serialized progress callbacks. Return promptly. |
 | `PluginRunner` | Explicit support for running configured discovery plugins. |

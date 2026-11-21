@@ -235,38 +235,12 @@ func copyCaptureObject(ctx context.Context, src content.Fetcher, dst content.Sto
 }
 
 func readLocalCapture(ctx context.Context, path string, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {
-	filename := filepath.Join(path, captureFile)
-	entry, err := os.Lstat(filename)
+	raw, err := readBoundedRegularFile(filepath.Join(path, captureFile), "local capture metadata", maxCaptureBytes)
 	if os.IsNotExist(err) {
 		return nil, "", fmt.Errorf("%w: local capture metadata disappeared", ErrNotFound)
 	}
 	if err != nil {
 		return nil, "", err
-	}
-	if !entry.Mode().IsRegular() || entry.Size() > maxCaptureBytes {
-		return nil, "", fmt.Errorf("invalid local capture metadata file")
-	}
-	fp, err := os.Open(filename)
-	if os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("%w: local capture metadata disappeared", ErrNotFound)
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() { _ = fp.Close() }()
-	info, err := fp.Stat()
-	if err != nil {
-		return nil, "", err
-	}
-	if !info.Mode().IsRegular() || info.Size() > maxCaptureBytes {
-		return nil, "", fmt.Errorf("invalid local capture metadata file")
-	}
-	raw, err := io.ReadAll(io.LimitReader(fp, maxCaptureBytes+1))
-	if err != nil {
-		return nil, "", err
-	}
-	if len(raw) > maxCaptureBytes {
-		return nil, "", fmt.Errorf("local capture metadata exceeds %d bytes", maxCaptureBytes)
 	}
 	if err := jsonutil.Validate(raw, true); err != nil {
 		return nil, "", fmt.Errorf("local capture metadata: %w", err)

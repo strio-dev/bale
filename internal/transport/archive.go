@@ -3,7 +3,6 @@ package transport
 import (
 	"archive/tar"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -345,8 +344,7 @@ func scanLayoutTar(ctx context.Context, name string) (root v1.Descriptor, retErr
 		}
 		switch member {
 		case "oci-layout", "index.json":
-			const maxArchiveMetadata = 8 << 20
-			if h.Size > maxArchiveMetadata {
+			if h.Size > maxLayoutHeaderBytes {
 				return root, fmt.Errorf("%w: OCI layout metadata exceeds 8 MiB", ErrInvalid)
 			}
 			raw, err := io.ReadAll(tr)
@@ -378,15 +376,14 @@ func scanLayoutTar(ctx context.Context, name string) (root v1.Descriptor, retErr
 		}
 		end = cr.n + (512-h.Size%512)%512
 	}
-	var layout v1.ImageLayout
-	if err := json.Unmarshal(layoutRaw, &layout); err != nil || layout.Version != v1.ImageLayoutVersion {
-		return root, fmt.Errorf("%w: unsupported OCI layout", ErrInvalid)
+	if err := decodeLayoutMarker(layoutRaw); err != nil {
+		return root, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	var index v1.Index
-	if err := json.Unmarshal(indexRaw, &index); err != nil || index.SchemaVersion != 2 || len(index.Manifests) != 1 || (index.MediaType != "" && index.MediaType != v1.MediaTypeImageIndex) || index.Subject != nil || index.ArtifactType != "" {
-		return root, fmt.Errorf("%w: archive requires one OCI bundle root", ErrInvalid)
+	root, err = decodeLayoutIndex(indexRaw)
+	if err != nil {
+		return root, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	return index.Manifests[0], nil
+	return root, nil
 }
 
 func validArchiveAlgorithmDirectory(name string) bool {

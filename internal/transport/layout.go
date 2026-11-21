@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -161,31 +162,98 @@ func publishLocalLayout(ctx context.Context, layoutPath string, root v1.Descript
 	return nil
 }
 
-func readLayoutRoot(path string) (*oci.Storage, v1.Descriptor, error) {
-	raw, err := os.ReadFile(filepath.Join(path, "oci-layout"))
-	if err != nil {
-		return nil, v1.Descriptor{}, err
+const maxLayoutHeaderBytes = 8 << 20
+
+// readBoundedRegularFile checks the path and opened file, then bounds the read
+// independently of the reported size in case the file grows.
+func readBoundedRegularFile(filename, label string, maxBytes int64) ([]byte, error) {
+	check := func(info os.FileInfo) error {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("invalid %s: not a regular file", label)
+		}
+		if info.Size() > maxBytes {
+			return fmt.Errorf("%s exceeds %d bytes", label, maxBytes)
+		}
+		return nil
 	}
+	entry, err := os.Lstat(filename)
+	if err != nil {
+		return nil, err
+	}
+	if err := check(entry); err != nil {
+		return nil, err
+	}
+	fp, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fp.Close() }()
+	info, err := fp.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if err := check(info); err != nil {
+		return nil, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(fp, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d bytes", label, maxBytes)
+	}
+	return raw, nil
+}
+
+func decodeLayoutMarker(raw []byte) error {
 	var layout v1.ImageLayout
-	if err := json.Unmarshal(raw, &layout); err != nil || layout.Version != v1.ImageLayoutVersion {
-		return nil, v1.Descriptor{}, fmt.Errorf("invalid OCI layout")
+	if err := json.Unmarshal(raw, &layout); err != nil {
+		return fmt.Errorf("invalid oci-layout: %w", err)
 	}
-	raw, err = os.ReadFile(filepath.Join(path, "index.json"))
-	if err != nil {
-		return nil, v1.Descriptor{}, err
+	if layout.Version != v1.ImageLayoutVersion {
+		return fmt.Errorf("unsupported oci-layout version %q", layout.Version)
 	}
+	return nil
+}
+
+func decodeLayoutIndex(raw []byte) (v1.Descriptor, error) {
 	var index v1.Index
 	if err := json.Unmarshal(raw, &index); err != nil {
-		return nil, v1.Descriptor{}, err
+		return v1.Descriptor{}, fmt.Errorf("invalid index.json: %w", err)
 	}
-	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
-		return nil, v1.Descriptor{}, fmt.Errorf("layout must contain exactly one bundle root")
+	if index.SchemaVersion != 2 || len(index.Manifests) != 1 ||
+		(index.MediaType != "" && index.MediaType != v1.MediaTypeImageIndex) ||
+		index.Subject != nil || index.ArtifactType != "" {
+		return v1.Descriptor{}, fmt.Errorf("index.json must be an OCI image index with exactly one bundle root and no subject or artifact type")
+	}
+	return index.Manifests[0], nil
+}
+
+func readLayoutDescriptor(path string) (v1.Descriptor, error) {
+	raw, err := readBoundedRegularFile(filepath.Join(path, "oci-layout"), "oci-layout", maxLayoutHeaderBytes)
+	if err != nil {
+		return v1.Descriptor{}, err
+	}
+	if err := decodeLayoutMarker(raw); err != nil {
+		return v1.Descriptor{}, err
+	}
+	raw, err = readBoundedRegularFile(filepath.Join(path, "index.json"), "index.json", maxLayoutHeaderBytes)
+	if err != nil {
+		return v1.Descriptor{}, err
+	}
+	return decodeLayoutIndex(raw)
+}
+
+func readLayoutRoot(path string) (*oci.Storage, v1.Descriptor, error) {
+	root, err := readLayoutDescriptor(path)
+	if err != nil {
+		return nil, v1.Descriptor{}, err
 	}
 	store, err := oci.NewStorage(path)
 	if err != nil {
 		return nil, v1.Descriptor{}, err
 	}
-	return store, index.Manifests[0], nil
+	return store, root, nil
 }
 
 func openLayout(ctx context.Context, path string) (*oci.Storage, bundle.Snapshot, error) {

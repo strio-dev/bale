@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -61,26 +60,9 @@ func (s *Service) inspectLayout(ctx context.Context, path string, load func(cont
 	if strings.TrimSpace(path) == "" {
 		return fail(ErrInvalid, fmt.Errorf("layout path is required"))
 	}
-	read := func(name string, target any) error {
-		raw, err := os.ReadFile(filepath.Join(path, name))
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(raw, target)
-	}
-	var layout v1.ImageLayout
-	if err := read("oci-layout", &layout); err != nil {
+	root, err := readLayoutDescriptor(path)
+	if err != nil {
 		return fail(layoutReadKind(err), err)
-	}
-	if layout.Version != v1.ImageLayoutVersion {
-		return fail(ErrIntegrity, fmt.Errorf("invalid OCI layout version"))
-	}
-	var index v1.Index
-	if err := read("index.json", &index); err != nil {
-		return fail(layoutReadKind(err), err)
-	}
-	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
-		return fail(ErrIntegrity, fmt.Errorf("layout must contain exactly one bundle root"))
 	}
 	store := oci.NewStorageFromFS(os.DirFS(path))
 	_, markerErr := os.Lstat(filepath.Join(path, captureFile))
@@ -91,7 +73,7 @@ func (s *Service) inspectLayout(ctx context.Context, path string, load func(cont
 	if metadataOnly {
 		load = bundle.InspectSnapshotGraph
 	}
-	result, err := s.inspectRoot(ctx, Root{Descriptor: index.Manifests[0], Store: store}, load)
+	result, err := s.inspectRoot(ctx, Root{Descriptor: root, Store: store}, load)
 	if err != nil {
 		return InspectResult{}, err
 	}

@@ -37,8 +37,10 @@ type Options struct {
 	PlainHTTPRegistries []string
 	HTTPClient          *http.Client
 	Credentials         auth.CredentialFunc
-	// AuthenticatedClient handles registry authentication. It cannot be combined
-	// with HTTPClient or Credentials.
+	// AuthenticatedClient owns transport and per-origin authentication for
+	// Bale-managed repositories. It may receive requests for multiple origins.
+	// It cannot be combined with HTTPClient or Credentials and is not used
+	// for caller-owned RepositoryFactory backends.
 	AuthenticatedClient remote.Client
 	OnProgress          func(Progress)
 }

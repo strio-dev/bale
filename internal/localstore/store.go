@@ -26,6 +26,7 @@ import (
 const maxMetadataBytes = 64 << 20
 const maxCaptureMetadataBytes = 16 << 20
 const captureName = "bale-capture.json"
+const atomicWritePrefix = ".bale-write-"
 
 type Store struct {
 	path    string
@@ -100,8 +101,8 @@ func OpenContext(ctx context.Context, path string) (*Store, error) {
 	return s, nil
 }
 
-// initialize publishes an empty index only for a genuinely new store. A missing
-// index in an existing store is data loss, never permission to sweep all blobs.
+// initialize publishes an empty index only for a fresh store or an interrupted
+// first open that left nothing except the layout marker and locks.
 func (s *Store) initialize(ctx context.Context) (retErr error) {
 	activity, err := lock(ctx, filepath.Join(s.path, ".activity.lock"), false)
 	if err != nil {
@@ -123,12 +124,33 @@ func (s *Store) initialize(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
+	layoutPath := filepath.Join(s.path, "oci-layout")
+	hasLayout := false
 	for _, entry := range entries {
-		if entry.Name() != ".activity.lock" && entry.Name() != ".metadata.lock" {
-			return fmt.Errorf("managed store index is missing from nonempty store %s", s.path)
+		if entry.Type().IsRegular() {
+			switch entry.Name() {
+			case ".activity.lock", ".metadata.lock":
+				continue
+			case "oci-layout":
+				hasLayout = true
+				continue
+			}
 		}
+		return fmt.Errorf("managed store index is missing from nonempty store %s", s.path)
 	}
-	if err := atomicWrite(filepath.Join(s.path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`)); err != nil {
+	if hasLayout {
+		raw, err := readFile(layoutPath)
+		if err != nil {
+			return err
+		}
+		// Only the marker schema written by this initializer can establish that
+		// this was a pristine store. Do not replace malformed or ambiguous metadata.
+		var layout map[string]string
+		if jsonutil.Validate(raw, true) != nil || json.Unmarshal(raw, &layout) != nil ||
+			len(layout) != 1 || layout["imageLayoutVersion"] != v1.ImageLayoutVersion {
+			return fmt.Errorf("invalid managed OCI layout")
+		}
+	} else if err := atomicWrite(layoutPath, []byte(`{"imageLayoutVersion":"1.0.0"}`)); err != nil {
 		return err
 	}
 	return (&Session{store: s}).writeIndex(ctx, &index{roots: map[digest.Digest]v1.Descriptor{}, names: map[string]digest.Digest{}})
@@ -286,7 +308,7 @@ func atomicWrite(path string, raw []byte) (retErr error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	fp, err := os.CreateTemp(filepath.Dir(path), ".bale-write-")
+	fp, err := os.CreateTemp(filepath.Dir(path), atomicWritePrefix)
 	if err != nil {
 		return err
 	}

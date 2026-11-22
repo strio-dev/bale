@@ -52,7 +52,7 @@ in
   };
   overrideModAttrs = _: _: { src = testSource; };
   modRoot = "plugins/helm-relocate";
-  vendorHash = "sha256-LEq1xi8dhW/zQvnUDp49A5TOMKp4j8lENTrLrniHUJ8=";
+  vendorHash = "sha256-2Egon4YgIeqqUYfRcwvqoI0wG6YXDywI1AtCp1CqG4Y=";
   subPackages =
     if consumer == "helm" then
       [

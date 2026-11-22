@@ -29,10 +29,12 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 	if err != nil {
 		return DeliveryPlan{}, operationError("destination", destination, v1.Descriptor{}, ErrInvalid, err)
 	}
-	store, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, layoutPath)
+	layout, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
+	defer layout.Close()
+	store := layout.store
 	plan := DeliveryPlan{MetadataOnly: capture != nil, captureDigest: captureDigest, LayoutPath: layoutPath, Destination: destination, Descriptor: snapshot.Descriptor, Repositories: []DeliveryRepository{}, Tags: []Tag{}}
 	if capture == nil {
 		if _, err := bundle.LoadSnapshotGraph(ctx, store, snapshot.Descriptor); err != nil {
@@ -395,10 +397,12 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 	if plan.seal == "" || plan.seal != planSeal(plan) {
 		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrInvalid, fmt.Errorf("delivery plan changed; generate a new plan"))
 	}
-	store, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, plan.LayoutPath)
+	layout, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, plan.LayoutPath)
 	if err != nil {
 		return result, err
 	}
+	defer layout.Close()
+	store := layout.store
 	if captureDigest != plan.captureDigest || (capture != nil) != plan.MetadataOnly {
 		return result, operationError("plan", plan.LayoutPath, plan.Descriptor, ErrIntegrity, fmt.Errorf("local capture sources changed since planning"))
 	}

@@ -50,10 +50,12 @@ func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath strin
 			return result, err
 		}
 	}
-	store, snapshot, capture, _, err := s.openLocalBundle(ctx, layoutPath)
+	layout, snapshot, capture, _, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
 		return result, err
 	}
+	defer layout.Close()
+	store := layout.store
 	if capture != nil {
 		store = captureSource{local: store, service: s, sources: capture.Sources}
 	}

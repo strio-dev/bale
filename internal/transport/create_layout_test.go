@@ -48,7 +48,7 @@ func TestCreateLayoutRetainsNestedPluginAndDependencyClosure(t *testing.T) {
 	if result.Stats.BlobBytesUploaded != 0 || result.Stats.ManifestBytesUploaded != 0 || result.Stats.BlobBytesDownloaded == 0 {
 		t.Fatalf("local writes counted as registry uploads or source reads missing: %+v", result.Stats)
 	}
-	store, snapshot, err := openLayout(ctx, path)
+	store, snapshot, err := openLayout(t, ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestLayoutRejectsHashValidInvalidNestedMetadata(t *testing.T) {
 	// A hand-crafted existing layout must be rejected by readers too, including
 	// the archive save path that opens layouts through this shared helper.
 	forged := layoutFor(t, store, outer.Descriptor)
-	if _, _, err := openLayout(ctx, forged); err == nil {
+	if _, _, err := openLayout(t, ctx, forged); err == nil {
 		t.Fatal("opened invalid nested bundle")
 	}
 }

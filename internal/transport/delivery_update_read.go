@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/deliveryfile"
-	"oras.land/oras-go/v2/content/oci"
 )
 
 // UpdateDelivery carries delivery paths between captured remote bundles. Each
@@ -42,11 +40,12 @@ func (s *Service) UpdateDelivery(ctx context.Context, beforeRef, afterRef string
 // captured envelopes, dependency declarations and nested metadata are verified.
 func (s *Service) UpdateDeliveryLayouts(ctx context.Context, beforePath, afterPath string, file deliveryfile.File) (DeliveryUpdateResult, error) {
 	load := func(path string) (deliveryUpdateSnapshot, error) {
-		inspection, err := s.inspectLayout(ctx, path, bundle.InspectSnapshotGraph)
+		layout, inspection, err := s.openInspectedLayout(ctx, path, bundle.InspectSnapshotGraph)
 		if err != nil {
 			return deliveryUpdateSnapshot{}, err
 		}
-		return deliveryUpdateMetadata(ctx, Root{Descriptor: inspection.Descriptor, Store: oci.NewStorageFromFS(os.DirFS(path))})
+		defer layout.Close()
+		return deliveryUpdateMetadata(ctx, Root{Descriptor: inspection.Descriptor, Store: layout.store})
 	}
 	return deliveryUpdateInputs(ctx, beforePath, afterPath, file,
 		func() (deliveryUpdateSnapshot, error) { return load(beforePath) },

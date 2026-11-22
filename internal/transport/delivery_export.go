@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/deliveryfile"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry"
 )
 
@@ -46,15 +44,25 @@ func (s *Service) ExportDelivery(ctx context.Context, reference string) (deliver
 }
 
 func (s *Service) ExportDeliveryLayout(ctx context.Context, path string) (deliveryfile.File, error) {
-	inspection, err := s.InspectLayout(ctx, path)
+	layout, inspection, err := s.openInspectedLayout(ctx, path, bundle.LoadSnapshotGraph)
 	if err != nil {
 		return deliveryfile.File{}, err
 	}
-	return deliveryFromVerified(ctx, attachmentSource{oci.NewStorageFromFS(os.DirFS(path))}, inspection.Descriptor)
+	defer layout.Close()
+	return deliveryFromVerified(ctx, attachmentSource{layout.store}, inspection.Descriptor)
 }
 
 func (s *Service) ExportDeliveryRoot(ctx context.Context, root Root) (deliveryfile.File, error) {
 	if _, err := s.InspectRoot(ctx, root); err != nil {
+		return deliveryfile.File{}, err
+	}
+	return deliveryFromVerified(ctx, attachmentSource{root.Store}, root.Descriptor)
+}
+
+// ExportDeliveryMetadataRoot builds delivery defaults from a pinned root
+// without requiring the opaque payloads of a metadata capture.
+func (s *Service) ExportDeliveryMetadataRoot(ctx context.Context, root Root) (deliveryfile.File, error) {
+	if _, err := s.InspectMetadataRoot(ctx, root); err != nil {
 		return deliveryfile.File{}, err
 	}
 	return deliveryFromVerified(ctx, attachmentSource{root.Store}, root.Descriptor)

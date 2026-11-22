@@ -20,6 +20,7 @@ import (
 	"github.com/strio-dev/bale/internal/pluginoci"
 	"github.com/strio-dev/bale/internal/wasmtest"
 	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func capturePluginFixture(t *testing.T, r *readRegistry) v1.Descriptor {
@@ -38,7 +39,7 @@ func capturePluginFixture(t *testing.T, r *readRegistry) v1.Descriptor {
 
 func TestConfiguredPluginCaptureProfilesAndLockedClosure(t *testing.T) {
 	r, repo, s := testRegistry(t)
-	s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
+	s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			return nil, fmt.Errorf("unexpected source write: %s %s", request.Method, request.URL)
 		}
@@ -256,7 +257,7 @@ func TestConfiguredPluginCreateDryRunAndFailureDoNotWrite(t *testing.T) {
 	subject := object(t, r.store, "subject")
 	r.tags["chart"] = subject
 	capturePluginFixture(t, r)
-	s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
+	s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			return nil, fmt.Errorf("unexpected registry write: %s", request.Method)
 		}
@@ -313,7 +314,7 @@ func TestConfiguredPluginInlineSubjectBinding(t *testing.T) {
 				t.Fatalf("inline-only fixture has backing blob: %t %v", exists, err)
 			}
 			boundReads := 0
-			s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
+			s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(request *http.Request) (*http.Response, error) {
 				if strings.HasSuffix(request.URL.Path, "/blobs/"+layer.Digest.String()) {
 					boundReads++
 					return nil, fmt.Errorf("inline chart unexpectedly fetched from source")

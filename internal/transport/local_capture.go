@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -234,40 +236,37 @@ func copyCaptureObject(ctx context.Context, src content.Fetcher, dst content.Sto
 	return errors.Join(verified.Verify(), ctx.Err())
 }
 
-func readLocalCapture(ctx context.Context, path string, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {
-	filename := filepath.Join(path, captureFile)
-	entry, err := os.Lstat(filename)
-	if os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("%w: local capture metadata disappeared", ErrNotFound)
+// captureMetadata reads the optional capture marker. Only an absent entry
+// denotes a complete layout; an invalid entry must not trigger that mode.
+func (l *openedLayout) captureMetadata() ([]byte, bool, error) {
+	file, err := l.files.open(captureFile)
+	if err == nil {
+		raw, err := readBoundedLayoutFile(captureFile, file, maxCaptureBytes)
+		return raw, err == nil, err
 	}
-	if err != nil {
-		return nil, "", err
+
+	if errors.Is(err, fs.ErrNotExist) {
+		// Inspect the leaf only after a not-found result to distinguish
+		// absence from a dangling entry. Never reopen using this result.
+		_, statErr := l.files.root.Lstat(captureFile)
+		switch {
+		case errors.Is(statErr, fs.ErrNotExist):
+			return nil, false, nil
+		case statErr != nil:
+			return nil, false, statErr
+		default:
+			// The entry exists: keep ENOENT diagnostic-only rather than
+			// exposing it to callers as an absence signal.
+			return nil, false, fmt.Errorf("%w: capture marker exists but could not be opened: %v", ErrIntegrity, err)
+		}
 	}
-	if !entry.Mode().IsRegular() || entry.Size() > maxCaptureBytes {
-		return nil, "", fmt.Errorf("invalid local capture metadata file")
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, false, fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
-	fp, err := os.Open(filename)
-	if os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("%w: local capture metadata disappeared", ErrNotFound)
-	}
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() { _ = fp.Close() }()
-	info, err := fp.Stat()
-	if err != nil {
-		return nil, "", err
-	}
-	if !info.Mode().IsRegular() || info.Size() > maxCaptureBytes {
-		return nil, "", fmt.Errorf("invalid local capture metadata file")
-	}
-	raw, err := io.ReadAll(io.LimitReader(fp, maxCaptureBytes+1))
-	if err != nil {
-		return nil, "", err
-	}
-	if len(raw) > maxCaptureBytes {
-		return nil, "", fmt.Errorf("local capture metadata exceeds %d bytes", maxCaptureBytes)
-	}
+	return nil, false, err
+}
+
+func decodeLocalCapture(ctx context.Context, raw []byte, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {
 	if err := jsonutil.Validate(raw, true); err != nil {
 		return nil, "", fmt.Errorf("local capture metadata: %w", err)
 	}
@@ -384,23 +383,34 @@ func (s captureSource) Exists(ctx context.Context, d v1.Descriptor) (bool, error
 
 // openLocalBundle never silently turns a damaged complete layout into an
 // online source. Remote payload fallback requires the explicit capture marker.
-func (s *Service) openLocalBundle(ctx context.Context, path string) (content.ReadOnlyStorage, bundle.Snapshot, *CaptureState, digest.Digest, error) {
-	store, root, err := readLayoutRoot(path)
+func (s *Service) openLocalBundle(ctx context.Context, path string) (_ *openedLayout, _ bundle.Snapshot, _ *CaptureState, _ digest.Digest, retErr error) {
+	layout, root, err := readLayoutRoot(path)
 	if err != nil {
 		return nil, bundle.Snapshot{}, nil, "", err
 	}
-	_, err = os.Lstat(filepath.Join(path, captureFile))
-	if os.IsNotExist(err) {
-		snapshot, err := bundle.LoadSnapshotGraph(ctx, store, root)
-		return store, snapshot, nil, "", err
-	}
+	defer func() {
+		if retErr != nil {
+			layout.Close()
+		}
+	}()
+	raw, metadataOnly, err := layout.captureMetadata()
 	if err != nil {
 		return nil, bundle.Snapshot{}, nil, "", err
 	}
-	snapshot, err := bundle.InspectSnapshotGraph(ctx, store, root)
+	load := bundle.LoadSnapshotGraph
+	if metadataOnly {
+		load = bundle.InspectSnapshotGraph
+	}
+	snapshot, err := load(ctx, layout.store, root)
 	if err != nil {
 		return nil, bundle.Snapshot{}, nil, "", err
 	}
-	state, hash, err := readLocalCapture(ctx, path, store, snapshot)
-	return store, snapshot, state, hash, err
+	if !metadataOnly {
+		return layout, snapshot, nil, "", nil
+	}
+	state, hash, err := decodeLocalCapture(ctx, raw, layout.store, snapshot)
+	if err != nil {
+		return nil, bundle.Snapshot{}, nil, "", err
+	}
+	return layout, snapshot, state, hash, nil
 }

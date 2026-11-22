@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -237,8 +238,8 @@ func runReleasePublication(t *testing.T, ctx context.Context, paths []string, ki
 		t.Fatal("publication accepted an unavailable final staged digest")
 	}
 	for _, ref := range append([]string{base + "-flux:" + imageTag, base + "/charts/bale-flux:" + strings.ReplaceAll(chart.Version, "+", "_")}, releasePublicationReferences(finalRefs)...) {
-		if _, err := client.Resolve(ctx, ref); err == nil {
-			t.Fatalf("preflight failure published %s", ref)
+		if _, err := client.Resolve(ctx, ref); !errors.Is(err, bale.ErrNotFound) {
+			t.Fatalf("after preflight failure, resolve %s: got %v, want ErrNotFound", ref, err)
 		}
 	}
 	writeFile(t, filepath.Join(staged, "helm-discovery.digest"), []byte(discovery.Descriptor.Digest.String()+"\n"))

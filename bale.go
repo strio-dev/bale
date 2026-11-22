@@ -287,6 +287,18 @@ func (c *Client) SaveTo(ctx context.Context, layoutPath string, out io.Writer) (
 	return c.service.SaveTo(ctx, layoutPath, out)
 }
 
+// SaveRoot writes a complete pinned bundle in caller-owned storage to a new
+// verified OCI archive. It does not resolve references or close the store.
+func (c *Client) SaveRoot(ctx context.Context, root Root, archivePath string) (ArchiveResult, error) {
+	return c.service.SaveRoot(ctx, root, archivePath)
+}
+
+// SaveRootTo writes a complete pinned bundle to out without closing the writer
+// or its caller-owned store.
+func (c *Client) SaveRootTo(ctx context.Context, root Root, out io.Writer) (ArchiveResult, error) {
+	return c.service.SaveRootTo(ctx, root, out)
+}
+
 // Load restores a verified OCI tar archive to a new bundle layout directory.
 // It leaves the archive unchanged and performs no network or plugin operations.
 func (c *Client) Load(ctx context.Context, archivePath, layoutPath string) (ArchiveResult, error) {
@@ -337,6 +349,12 @@ func (c *Client) ExportDeliveryRoot(ctx context.Context, root Root) (DeliveryFil
 	return c.service.ExportDeliveryRoot(ctx, root)
 }
 
+// ExportDeliveryMetadataRoot exports default paths from a pinned metadata-only
+// bundle without requiring opaque payloads or closing the caller-owned store.
+func (c *Client) ExportDeliveryMetadataRoot(ctx context.Context, root Root) (DeliveryFile, error) {
+	return c.service.ExportDeliveryMetadataRoot(ctx, root)
+}
+
 // UpdateDelivery carries explicit delivery paths between captured registry
 // snapshots. Exact identities and unambiguous selector changes preserve paths.
 // It validates interpreted metadata without reading opaque payloads or refreshing
@@ -376,6 +394,18 @@ func (c *Client) PlanPush(ctx context.Context, layoutPath, destination string, o
 	return c.service.PlanPush(ctx, layoutPath, destination, options)
 }
 
+// PlanPushRoot validates delivery of a pinned bundle in caller-owned storage.
+// Capture permits missing payloads only from its validated, pinned sources.
+func (c *Client) PlanPushRoot(ctx context.Context, root Root, capture *CaptureState, reference, destination string, options PushOptions) (DeliveryPlan, error) {
+	return c.service.PlanPushRoot(ctx, root, capture, reference, destination, options)
+}
+
+// PushRoot executes a sealed delivery plan against the same pinned root and
+// capture used for planning, without closing the caller-owned store.
+func (c *Client) PushRoot(ctx context.Context, root Root, capture *CaptureState, plan DeliveryPlan) (PushResult, error) {
+	return c.service.PushRoot(ctx, root, capture, plan)
+}
+
 // Push publishes a validated bundle delivery plan. Tags and Relocations report
 // confirmed publications, including on failure. Repositories, RepositoryMap, and
 // Referrers describe the planned delivery and do not imply successful publication.
@@ -400,6 +430,12 @@ func (c *Client) InspectLayout(ctx context.Context, layoutPath string) (InspectR
 // resolving references, discovering referrers, or taking ownership of the store.
 func (c *Client) InspectRoot(ctx context.Context, root Root) (InspectResult, error) {
 	return c.service.InspectRoot(ctx, root)
+}
+
+// InspectMetadataRoot verifies the interpreted graph of a pinned metadata-only
+// bundle without reading opaque payloads or closing the caller-owned store.
+func (c *Client) InspectMetadataRoot(ctx context.Context, root Root) (InspectResult, error) {
+	return c.service.InspectMetadataRoot(ctx, root)
 }
 
 // Diff compares captured metadata from two registry bundles. Each reference is

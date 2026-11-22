@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	digest "github.com/opencontainers/go-digest"
@@ -85,11 +86,30 @@ func (s *Store) Prune(ctx context.Context, dryRun bool) (result PruneResult, ret
 			}
 			for _, file := range files {
 				if !strings.HasSuffix(file.Name(), ".json") {
+					// The activity and metadata locks exclude active writers. Ignore
+					// only files matching the capture writer's temporary-file shape;
+					// leave them in place because shape alone is not ownership proof.
+					if digest.Algorithm(algorithm.Name()).Available() && isAtomicWriteTempName(file.Name()) {
+						info, err := file.Info()
+						if err != nil {
+							return err
+						}
+						if info.Mode()&^0600 == 0 && info.Size() <= maxCaptureMetadataBytes {
+							continue
+						}
+					}
 					return fmt.Errorf("invalid capture record path")
 				}
 				d, err := digest.Parse(algorithm.Name() + ":" + strings.TrimSuffix(file.Name(), ".json"))
 				if err != nil {
 					return err
+				}
+				info, err := file.Info()
+				if err != nil {
+					return err
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("invalid capture record file")
 				}
 				if _, retained := current.roots[d]; !retained {
 					captures = append(captures, filepath.Join(s.path, "captures", algorithm.Name(), file.Name()))
@@ -122,4 +142,15 @@ func (s *Store) Prune(ctx context.Context, dryRun bool) (result PruneResult, ret
 		return nil
 	})
 	return
+}
+
+// isAtomicWriteTempName matches the writer's CreateTemp prefix and Go's
+// canonical decimal uint32 suffix, not arbitrary files sharing the prefix.
+func isAtomicWriteTempName(name string) bool {
+	suffix, ok := strings.CutPrefix(name, atomicWritePrefix)
+	if !ok {
+		return false
+	}
+	n, err := strconv.ParseUint(suffix, 10, 32)
+	return err == nil && suffix == strconv.FormatUint(n, 10)
 }

@@ -2,11 +2,9 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,7 +12,6 @@ import (
 	"github.com/strio-dev/bale/internal/bundle"
 	"github.com/strio-dev/bale/internal/dependency"
 	"oras.land/oras-go/v2/content"
-	"oras.land/oras-go/v2/content/oci"
 )
 
 // InspectResult contains verified captured metadata, without refreshing selectors
@@ -52,8 +49,19 @@ func (s *Service) InspectLayout(ctx context.Context, path string) (InspectResult
 }
 
 func (s *Service) inspectLayout(ctx context.Context, path string, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) (InspectResult, error) {
-	fail := func(kind, err error) (InspectResult, error) {
-		return InspectResult{}, operationError("inspect layout", path, v1.Descriptor{}, kind, err)
+	layout, result, err := s.openInspectedLayout(ctx, path, load)
+	if err != nil {
+		return InspectResult{}, err
+	}
+	defer layout.Close()
+	return result, nil
+}
+
+// openInspectedLayout transfers the layout to callers that need further reads
+// after inspection. It closes the layout itself on failure.
+func (s *Service) openInspectedLayout(ctx context.Context, path string, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) (_ *openedLayout, _ InspectResult, retErr error) {
+	fail := func(kind, err error) (*openedLayout, InspectResult, error) {
+		return nil, InspectResult{}, operationError("inspect layout", path, v1.Descriptor{}, kind, err)
 	}
 	if err := ctx.Err(); err != nil {
 		return fail(nil, err)
@@ -61,53 +69,42 @@ func (s *Service) inspectLayout(ctx context.Context, path string, load func(cont
 	if strings.TrimSpace(path) == "" {
 		return fail(ErrInvalid, fmt.Errorf("layout path is required"))
 	}
-	read := func(name string, target any) error {
-		raw, err := os.ReadFile(filepath.Join(path, name))
-		if err != nil {
-			return err
+	layout, root, err := readLayoutRoot(path)
+	if err != nil {
+		return fail(layoutReadKind(err), err)
+	}
+	defer func() {
+		if retErr != nil {
+			layout.Close()
 		}
-		return json.Unmarshal(raw, target)
-	}
-	var layout v1.ImageLayout
-	if err := read("oci-layout", &layout); err != nil {
+	}()
+	raw, metadataOnly, err := layout.captureMetadata()
+	if err != nil {
 		return fail(layoutReadKind(err), err)
-	}
-	if layout.Version != v1.ImageLayoutVersion {
-		return fail(ErrIntegrity, fmt.Errorf("invalid OCI layout version"))
-	}
-	var index v1.Index
-	if err := read("index.json", &index); err != nil {
-		return fail(layoutReadKind(err), err)
-	}
-	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
-		return fail(ErrIntegrity, fmt.Errorf("layout must contain exactly one bundle root"))
-	}
-	store := oci.NewStorageFromFS(os.DirFS(path))
-	_, markerErr := os.Lstat(filepath.Join(path, captureFile))
-	metadataOnly := markerErr == nil
-	if markerErr != nil && !os.IsNotExist(markerErr) {
-		return fail(nil, markerErr)
 	}
 	if metadataOnly {
 		load = bundle.InspectSnapshotGraph
 	}
-	result, err := s.inspectRoot(ctx, Root{Descriptor: index.Manifests[0], Store: store}, load)
+	result, err := s.inspectRoot(ctx, Root{Descriptor: root, Store: layout.store}, load)
 	if err != nil {
-		return InspectResult{}, err
+		return nil, InspectResult{}, err
 	}
 	if metadataOnly {
 		snapshot := bundle.Snapshot{Descriptor: result.Descriptor, Metadata: result.Metadata}
-		if _, _, err := readLocalCapture(ctx, path, store, snapshot); err != nil {
+		if _, _, err := decodeLocalCapture(ctx, raw, layout.store, snapshot); err != nil {
 			return fail(ErrIntegrity, err)
 		}
 		result.MetadataOnly = true
 	}
-	return result, nil
+	return layout, result, nil
 }
 
 func layoutReadKind(err error) error {
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
+	}
+	if errors.Is(err, ErrIntegrity) || errors.Is(err, ErrUnsupported) {
+		return nil
 	}
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
@@ -120,6 +117,16 @@ func layoutReadKind(err error) error {
 // discover referrers, resolve source selectors, publish content, or close Store.
 func (s *Service) InspectRoot(ctx context.Context, root Root) (InspectResult, error) {
 	return s.inspectRoot(ctx, root, bundle.LoadSnapshotGraph)
+}
+
+// InspectMetadataRoot verifies a pinned bundle's envelopes and interpreted metadata
+// without reading opaque payloads or contacting capture sources. It borrows Root.Store.
+func (s *Service) InspectMetadataRoot(ctx context.Context, root Root) (InspectResult, error) {
+	result, err := s.inspectRoot(ctx, root, bundle.InspectSnapshotGraph)
+	if err == nil {
+		result.MetadataOnly = true
+	}
+	return result, err
 }
 
 func (s *Service) inspectRoot(ctx context.Context, root Root, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) (InspectResult, error) {

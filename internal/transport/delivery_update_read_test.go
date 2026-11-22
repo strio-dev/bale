@@ -179,10 +179,10 @@ func TestUpdateDeliveryRegistryPinsOnceAndHonorsHTTPAndCredentials(t *testing.T)
 	r.tags["after"] = snapshot.Descriptor
 	file := deliveryfile.File{Bundle: snapshot.Descriptor.Digest}
 	requests := []string{}
-	service.client.Credential = func(context.Context, string) (auth.Credential, error) {
+	service.client.(*auth.Client).Credential = func(context.Context, string) (auth.Credential, error) {
 		return auth.Credential{Username: "explicit-user", Password: "explicit-password"}, nil
 	}
-	service.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+	service.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 		requests = append(requests, req.Method+" "+req.URL.Path)
 		if req.URL.Host != strings.Split(repo, "/")[0] || req.URL.Scheme != "http" {
 			return nil, fmt.Errorf("unexpected host or protocol: %s", req.URL)

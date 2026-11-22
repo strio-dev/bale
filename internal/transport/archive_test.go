@@ -75,7 +75,7 @@ func TestArchiveRoundTripDeterministicClosure(t *testing.T) {
 	if !reflect.DeepEqual(got.Descriptor, root.Descriptor) || got.LayoutPath != loaded || got.ArchivePath != first {
 		t.Fatalf("load result: %+v", got)
 	}
-	_, snapshot, err := openLayout(ctx, loaded)
+	_, snapshot, err := openLayout(t, ctx, loaded)
 	if err != nil {
 		t.Fatal(err)
 	}

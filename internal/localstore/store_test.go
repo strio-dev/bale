@@ -306,3 +306,14 @@ func TestOpenContextCancelsBehindExclusiveActivity(t *testing.T) {
 		t.Fatalf("open ignored cancellation: %v", err)
 	}
 }
+
+func TestReadStoreMetadataUsesPerFileLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "metadata")
+	writeStoreFixture(t, path, "12345678")
+	if raw, err := readFile(path, 8); err != nil || string(raw) != "12345678" {
+		t.Fatalf("read at limit: %q, %v", raw, err)
+	}
+	if _, err := readFile(path, 7); err == nil {
+		t.Fatal("read exceeded the supplied metadata limit")
+	}
+}

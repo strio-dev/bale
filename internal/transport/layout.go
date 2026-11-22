@@ -161,41 +161,26 @@ func publishLocalLayout(ctx context.Context, layoutPath string, root v1.Descript
 	return nil
 }
 
-func readLayoutRoot(path string) (*oci.Storage, v1.Descriptor, error) {
-	raw, err := os.ReadFile(filepath.Join(path, "oci-layout"))
-	if err != nil {
-		return nil, v1.Descriptor{}, err
-	}
+func decodeLayoutMarker(raw []byte) error {
 	var layout v1.ImageLayout
-	if err := json.Unmarshal(raw, &layout); err != nil || layout.Version != v1.ImageLayoutVersion {
-		return nil, v1.Descriptor{}, fmt.Errorf("invalid OCI layout")
+	if err := json.Unmarshal(raw, &layout); err != nil {
+		return fmt.Errorf("invalid oci-layout: %w", err)
 	}
-	raw, err = os.ReadFile(filepath.Join(path, "index.json"))
-	if err != nil {
-		return nil, v1.Descriptor{}, err
+	if layout.Version != v1.ImageLayoutVersion {
+		return fmt.Errorf("unsupported oci-layout version %q", layout.Version)
 	}
-	var index v1.Index
-	if err := json.Unmarshal(raw, &index); err != nil {
-		return nil, v1.Descriptor{}, err
-	}
-	if index.SchemaVersion != 2 || len(index.Manifests) != 1 {
-		return nil, v1.Descriptor{}, fmt.Errorf("layout must contain exactly one bundle root")
-	}
-	store, err := oci.NewStorage(path)
-	if err != nil {
-		return nil, v1.Descriptor{}, err
-	}
-	return store, index.Manifests[0], nil
+	return nil
 }
 
-func openLayout(ctx context.Context, path string) (*oci.Storage, bundle.Snapshot, error) {
-	store, root, err := readLayoutRoot(path)
-	if err != nil {
-		return nil, bundle.Snapshot{}, err
+func decodeLayoutIndex(raw []byte) (v1.Descriptor, error) {
+	var index v1.Index
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return v1.Descriptor{}, fmt.Errorf("invalid index.json: %w", err)
 	}
-	snapshot, err := bundle.LoadSnapshotGraph(ctx, store, root)
-	if err != nil {
-		return nil, bundle.Snapshot{}, err
+	if index.SchemaVersion != 2 || len(index.Manifests) != 1 ||
+		(index.MediaType != "" && index.MediaType != v1.MediaTypeImageIndex) ||
+		index.Subject != nil || index.ArtifactType != "" {
+		return v1.Descriptor{}, fmt.Errorf("index.json must be an OCI image index with exactly one bundle root and no subject or artifact type")
 	}
-	return store, snapshot, nil
+	return index.Manifests[0], nil
 }

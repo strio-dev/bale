@@ -13,6 +13,7 @@ import (
 
 	"github.com/strio-dev/bale/internal/config"
 	"github.com/strio-dev/bale/internal/dependency"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func TestCaptureProgressPrecedesWorkAndDryRunDoesNotPublish(t *testing.T) {
@@ -30,7 +31,7 @@ func TestCaptureProgressPrecedesWorkAndDryRunDoesNotPublish(t *testing.T) {
 		}
 		return false
 	}
-	s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+	s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodHead && req.Method != http.MethodGet {
 			t.Fatalf("dry run wrote registry: %s", req.Method)
 		}
@@ -131,7 +132,7 @@ func TestCapturePluginFailureContextAndCause(t *testing.T) {
 				return dependency.Declaration{}, nil
 			}
 			if mode == "fetch" {
-				s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+				s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 					if len(events) > 0 && events[len(events)-1].Operation == "fetching-plugin" && *events[len(events)-1].Input == 1 && req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/manifests/"+module.Digest.String()) {
 						return nil, sentinel
 					}
@@ -191,7 +192,7 @@ func TestCaptureResolutionFailureContext(t *testing.T) {
 			if pluginFailure {
 				target = "missing"
 			}
-			s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+			s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 				if strings.HasSuffix(req.URL.Path, "/manifests/"+target) {
 					return nil, sentinel
 				}
@@ -214,7 +215,7 @@ func TestCaptureRootGraphFailureContext(t *testing.T) {
 	second := object(t, r.store, "second")
 	r.tags["first"], r.tags["second"] = first, second
 	sentinel := errors.New("graph fetch failed")
-	s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+	s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/manifests/"+second.Digest.String()) {
 			return nil, sentinel
 		}
@@ -232,7 +233,7 @@ func TestCaptureDependencyFailureContext(t *testing.T) {
 	r.tags["chart"] = subject
 	dependencyDeclaration(t, r, subject, "profile", dependency.Reference{Ref: repo + ":missing"})
 	sentinel := errors.New("dependency resolve failed")
-	s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+	s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, "/manifests/missing") {
 			return nil, sentinel
 		}

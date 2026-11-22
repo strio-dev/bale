@@ -5,12 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/strio-dev/bale/store"
 )
 
-func TestManagedArchiveStreamsHydrateOnceAndRoundTrip(t *testing.T) {
+func TestManagedAndExternalArchivesInteroperateOffline(t *testing.T) {
 	f, server, client, recipe := source(t)
 	defer server.Close()
 	s := local(t, client)
@@ -35,8 +36,38 @@ func TestManagedArchiveStreamsHydrateOnceAndRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Equal(file, archive.Bytes()) {
 		t.Fatalf("file and stream archives differ: %v", err)
 	}
+	// Cross both public archive boundaries with the original registry offline.
+	layout := filepath.Join(t.TempDir(), "external-layout")
+	external, err := client.Load(t.Context(), path, layout)
+	if err != nil || external.Descriptor.Digest != created.Descriptor.Digest || external.LayoutPath != layout {
+		t.Fatalf("external load of managed archive: %+v %v", external, err)
+	}
+	inspectedLayout, err := client.InspectLayout(t.Context(), layout)
+	if err != nil || inspectedLayout.Descriptor.Digest != created.Descriptor.Digest || inspectedLayout.MetadataOnly {
+		t.Fatalf("imported external layout: %+v %v", inspectedLayout, err)
+	}
+	var repacked bytes.Buffer
+	externalSave, err := client.SaveTo(t.Context(), layout, &repacked)
+	if err != nil || externalSave.Descriptor.Digest != created.Descriptor.Digest || !bytes.Equal(file, repacked.Bytes()) {
+		t.Fatalf("external save changed portable archive: %+v %v", externalSave, err)
+	}
+	t.Run("explicit layout root alias", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating directory links on Windows can require extra privileges")
+		}
+		alias := filepath.Join(filepath.Dir(layout), "external-alias")
+		if err := os.Symlink(filepath.Base(layout), alias); err != nil {
+			t.Fatal(err)
+		}
+		var linked bytes.Buffer
+		savedAlias, err := client.SaveTo(t.Context(), alias, &linked)
+		if err != nil || savedAlias.Descriptor.Digest != created.Descriptor.Digest || !bytes.Equal(file, linked.Bytes()) {
+			t.Fatalf("layout root alias changed portable archive: %+v %v", savedAlias, err)
+		}
+	})
+
 	destination := local(t, client)
-	loaded, err := destination.LoadFrom(t.Context(), bytes.NewReader(archive.Bytes()), []string{"imported:v1"})
+	loaded, err := destination.LoadFrom(t.Context(), &repacked, []string{"imported:v1"})
 	if err != nil || loaded.Descriptor.Digest != created.Descriptor.Digest || loaded.LayoutPath != "" || loaded.ArchivePath != "" {
 		t.Fatalf("load stream: %+v %v", loaded, err)
 	}

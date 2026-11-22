@@ -37,13 +37,18 @@ type Options struct {
 	PlainHTTPRegistries []string
 	HTTPClient          *http.Client
 	Credentials         auth.CredentialFunc
+	// AuthenticatedClient owns transport and per-origin authentication for
+	// Bale-managed repositories. It may receive requests for multiple origins.
+	// It cannot be combined with HTTPClient or Credentials and is not used
+	// for caller-owned RepositoryFactory backends.
+	AuthenticatedClient remote.Client
 	OnProgress          func(Progress)
 }
 type Service struct {
 	pluginRunner      PluginRunner
 	repositoryFactory RepositoryFactory
 	httpHosts         map[string]bool
-	client            *auth.Client
+	client            remote.Client
 	onProgress        func(Progress)
 	progressMu        sync.Mutex
 	publishGate       chan struct{}
@@ -118,6 +123,7 @@ type DestinationAttachment struct {
 type DeliveryPlan struct {
 	MetadataOnly  bool `json:"metadataOnly,omitempty"`
 	captureDigest digest.Digest
+	pinnedRoot    bool
 	Destinations  []DestinationAttachment `json:"destinations"`
 	// Relocations lists planned canonical placements; Push confirms them after verification.
 	Relocations   Relocations          `json:"relocations"`
@@ -144,11 +150,18 @@ type PushResult struct {
 }
 
 func NewService(opts Options) (*Service, error) {
-	client := opts.HTTPClient
-	if client == nil {
-		client = auth.DefaultClient.Client
+	client := opts.AuthenticatedClient
+	if client != nil && (opts.HTTPClient != nil || opts.Credentials != nil) {
+		return nil, operationError("configure", "", v1.Descriptor{}, ErrInvalid, errors.New("AuthenticatedClient cannot be combined with HTTPClient or Credentials"))
 	}
-	s := &Service{pluginRunner: opts.PluginRunner, repositoryFactory: opts.RepositoryFactory, httpHosts: map[string]bool{}, client: &auth.Client{Client: client, Cache: auth.NewCache(), Credential: opts.Credentials}, onProgress: opts.OnProgress, publishGate: make(chan struct{}, 1)}
+	if client == nil {
+		httpClient := opts.HTTPClient
+		if httpClient == nil {
+			httpClient = auth.DefaultClient.Client
+		}
+		client = &auth.Client{Client: httpClient, Cache: auth.NewCache(), Credential: opts.Credentials}
+	}
+	s := &Service{pluginRunner: opts.PluginRunner, repositoryFactory: opts.RepositoryFactory, httpHosts: map[string]bool{}, client: client, onProgress: opts.OnProgress, publishGate: make(chan struct{}, 1)}
 	for _, host := range opts.PlainHTTPRegistries {
 		ref, err := registry.ParseReference(host + "/bale")
 		if err != nil || ref.Registry != host {

@@ -21,6 +21,7 @@ import (
 	"github.com/strio-dev/bale/internal/config"
 	"github.com/strio-dev/bale/internal/dependency"
 	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func TestCreateLocalRetainsMetadataWithoutPayloadDownloads(t *testing.T) {
@@ -50,7 +51,7 @@ func TestCreateLocalRetainsMetadataWithoutPayloadDownloads(t *testing.T) {
 		t.Fatal("capture wrote to source registry")
 	}
 	// Discovery may read its module. Ordinary image layers remain absent locally.
-	store, root, err := readLayoutRoot(path)
+	store, root, err := openLayoutTestRoot(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +273,7 @@ func TestCreateLocalDryRunAndCompleteLayoutIntegrity(t *testing.T) {
 	if _, err := s.CreateLayout(ctx, recipe, path, CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	store, snapshot, err := openLayout(ctx, path)
+	store, snapshot, err := openLayout(t, ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +355,7 @@ func TestPushLocalCaptureStreamsPinnedPayloadAndReusesDestination(t *testing.T) 
 			case "missing":
 				delete(r.store.descriptors, payload.Digest.String())
 			case "corrupt":
-				s.client.Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
+				s.client.(*auth.Client).Client = &http.Client{Transport: deliveryRoundTripper(func(req *http.Request) (*http.Response, error) {
 					if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/blobs/"+payload.Digest.String()) {
 						return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/octet-stream"}}, Body: io.NopCloser(strings.NewReader(strings.Repeat("!", int(payload.Size)))), ContentLength: payload.Size, Request: req}, nil
 					}
@@ -424,7 +425,7 @@ func TestCreateLocalRetainsSharedInlinePayloadInEitherTraversalOrder(t *testing.
 			if _, err := s.Save(ctx, path, filepath.Join(t.TempDir(), "offline.tar")); err != nil {
 				t.Fatal(err)
 			}
-			store, root, err := readLayoutRoot(path)
+			store, root, err := openLayoutTestRoot(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}

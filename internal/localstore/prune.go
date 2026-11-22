@@ -104,6 +104,13 @@ func (s *Store) Prune(ctx context.Context, dryRun bool) (result PruneResult, ret
 				if err != nil {
 					return err
 				}
+				info, err := file.Info()
+				if err != nil {
+					return err
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("invalid capture record file")
+				}
 				if _, retained := current.roots[d]; !retained {
 					captures = append(captures, filepath.Join(s.path, "captures", algorithm.Name(), file.Name()))
 				}

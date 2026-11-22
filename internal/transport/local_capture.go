@@ -362,7 +362,7 @@ func (s captureSource) Exists(ctx context.Context, d v1.Descriptor) (bool, error
 // openLocalBundle never silently turns a damaged complete layout into an
 // online source. Remote payload fallback requires the explicit capture marker.
 func (s *Service) openLocalBundle(ctx context.Context, path string) (_ *openedLayout, _ bundle.Snapshot, _ *CaptureState, _ digest.Digest, retErr error) {
-	layout, root, err := readLayoutRoot(ctx, path)
+	layout, root, err := readLayoutRoot(path)
 	if err != nil {
 		return nil, bundle.Snapshot{}, nil, "", err
 	}

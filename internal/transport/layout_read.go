@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -22,11 +21,26 @@ type openedLayout struct {
 	store content.ReadOnlyStorage
 }
 
-func (l *openedLayout) Close() { _ = l.files.directory.Close() }
+func (l *openedLayout) Close() {
+	if l.files.memberRoot != nil {
+		_ = l.files.memberRoot.Close()
+	}
+	_ = l.files.directory.Close()
+}
 
 // layoutFiles implements only Open so ORAS Fetch and fs.Stat (used by
 // Exists) both go through the same descriptor-validated regular-file policy.
-type layoutFiles struct{ directory *os.File }
+type layoutFiles struct {
+	directory  *os.File
+	memberRoot *layoutMemberRoot
+}
+
+type layoutMemberRoot struct {
+	root  *os.Root
+	flags int
+}
+
+func (r *layoutMemberRoot) Close() error { return r.root.Close() }
 
 func (f layoutFiles) Open(name string) (fs.File, error) {
 	file, _, err := f.openRegular(name)
@@ -41,6 +55,32 @@ func (f layoutFiles) openRegular(name string) (*os.File, fs.FileInfo, error) {
 	if name == "." || !fs.ValidPath(name) || strings.ContainsAny(name, "\\:\x00") {
 		return nil, nil, pathErr(fs.ErrInvalid)
 	}
+	var file *os.File
+	var err error
+	// Only the OCI headers and blobs may use rooted relative links. The
+	// optional capture marker uses no-follow so an invalid link is not missing.
+	if f.memberRoot != nil && (name == "oci-layout" || name == "index.json" || strings.HasPrefix(name, "blobs/")) {
+		file, err = f.memberRoot.root.OpenFile(name, f.memberRoot.flags, 0)
+	} else {
+		file, err = f.openNoFollow(name)
+	}
+	if err != nil {
+		return nil, nil, pathErr(err)
+	}
+	info, err := file.Stat()
+	if err == nil && !info.Mode().IsRegular() {
+		err = fmt.Errorf("%w: not a regular file", ErrIntegrity)
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, pathErr(err)
+	}
+	return file, info, nil
+}
+
+// openNoFollow performs strict single-component lookup for capture metadata
+// and for platforms without rooted link handling.
+func (f layoutFiles) openNoFollow(name string) (*os.File, error) {
 	parent, remaining := f.directory, name
 	for {
 		part, rest, more := strings.Cut(remaining, "/")
@@ -48,19 +88,8 @@ func (f layoutFiles) openRegular(name string) (*os.File, fs.FileInfo, error) {
 		if parent != f.directory {
 			_ = parent.Close()
 		}
-		if err != nil {
-			return nil, nil, pathErr(err)
-		}
-		if !more {
-			info, err := file.Stat()
-			if err == nil && !info.Mode().IsRegular() {
-				err = fmt.Errorf("%w: not a regular file", ErrIntegrity)
-			}
-			if err != nil {
-				_ = file.Close()
-				return nil, nil, pathErr(err)
-			}
-			return file, info, nil
+		if err != nil || !more {
+			return file, err
 		}
 		parent, remaining = file, rest
 	}
@@ -102,34 +131,23 @@ func (l *openedLayout) descriptor() (v1.Descriptor, error) {
 	return decodeLayoutIndex(raw)
 }
 
-type managedLayoutCASKey string
-
-type managedLayoutCAS struct{ store *oci.Storage }
-
-// WithManagedLayoutCAS binds a cooperating store session's CAS to its exact
-// private view path. The view's headers are still read through the directory
-// handle; blob reads use the already-open CAS instead of traversing its link.
-// The store session must outlive use of the returned context.
-func WithManagedLayoutCAS(ctx context.Context, viewPath string, cas *oci.Storage) context.Context {
-	return context.WithValue(ctx, managedLayoutCASKey(viewPath), managedLayoutCAS{store: cas})
-}
-
 // A successful caller owns the returned layout. On failure no handle escapes.
-func readLayoutRoot(ctx context.Context, path string) (*openedLayout, v1.Descriptor, error) {
+func readLayoutRoot(path string) (*openedLayout, v1.Descriptor, error) {
 	dir, err := openLayoutDirectory(path)
 	if err != nil {
 		return nil, v1.Descriptor{}, err
 	}
-	layout := &openedLayout{files: layoutFiles{dir}}
+	layout := &openedLayout{files: layoutFiles{directory: dir}}
+	layout.files.memberRoot, err = openLayoutMemberRoot(path, dir)
+	if err != nil {
+		layout.Close()
+		return nil, v1.Descriptor{}, err
+	}
 	root, err := layout.descriptor()
 	if err != nil {
 		layout.Close()
 		return nil, v1.Descriptor{}, err
 	}
-	if cas, ok := ctx.Value(managedLayoutCASKey(path)).(managedLayoutCAS); ok && cas.store != nil {
-		layout.store = cas.store
-	} else {
-		layout.store = oci.NewStorageFromFS(layout.files)
-	}
+	layout.store = oci.NewStorageFromFS(layout.files)
 	return layout, root, nil
 }

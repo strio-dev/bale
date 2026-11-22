@@ -25,6 +25,10 @@ func openLayoutDirectory(path string) (*os.File, error) {
 	return dir, nil
 }
 
+// Keep the no-reparse policy. The pinned os.Root implementation uses a
+// synchronous Windows open by default, unlike the Unix nonblocking member lookup.
+func openLayoutMemberRoot(string, *os.File) (*layoutMemberRoot, error) { return nil, nil }
+
 func openLayoutMemberAt(parent *os.File, name string, directory bool) (*os.File, error) {
 	// Each lookup has only a leaf: open the reparse point itself, never its
 	// target. Reject all reparse points using the resulting handle.

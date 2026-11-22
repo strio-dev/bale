@@ -59,6 +59,15 @@ func (s *Service) ExportDeliveryRoot(ctx context.Context, root Root) (deliveryfi
 	return deliveryFromVerified(ctx, attachmentSource{root.Store}, root.Descriptor)
 }
 
+// ExportDeliveryMetadataRoot builds delivery defaults from a pinned root
+// without requiring the opaque payloads of a metadata capture.
+func (s *Service) ExportDeliveryMetadataRoot(ctx context.Context, root Root) (deliveryfile.File, error) {
+	if _, err := s.InspectMetadataRoot(ctx, root); err != nil {
+		return deliveryfile.File{}, err
+	}
+	return deliveryFromVerified(ctx, attachmentSource{root.Store}, root.Descriptor)
+}
+
 func deliveryFromVerified(ctx context.Context, store content.ReadOnlyStorage, root v1.Descriptor) (deliveryfile.File, error) {
 	// The caller validated captured metadata at every native bundle boundary.
 	// Read those inventories again without reading opaque application payloads.

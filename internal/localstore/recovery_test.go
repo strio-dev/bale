@@ -226,3 +226,64 @@ func TestPruneRejectsUnknownCaptureEntriesBeforeDeletion(t *testing.T) {
 		})
 	}
 }
+
+func TestPrunePreflightsCaptureFilesBeforeDeletingBlobs(t *testing.T) {
+	s := newStore(t)
+	fixture(t, s, "source.example/retained", "retained")
+	var unretained digest.Digest
+	if err := s.With(t.Context(), func(session *Session) error {
+		unretained = put(t, session.Storage(), "application/octet-stream", []byte("unretained")).Digest
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	capture := capturePath(s.Path(), unretained)
+	if err := os.MkdirAll(capture, 0700); err != nil {
+		t.Fatal(err)
+	}
+	blob := filepath.Join(s.Path(), "blobs", unretained.Algorithm().String(), unretained.Encoded())
+	for _, dryRun := range []bool{true, false} {
+		if result, err := s.Prune(t.Context(), dryRun); err == nil || result != (PruneResult{}) {
+			t.Fatalf("prune(dryRun=%v) accepted capture directory: %+v, %v", dryRun, result, err)
+		}
+		if _, err := os.Stat(blob); err != nil {
+			t.Fatal("prune deleted unretained blob before capture validation:", err)
+		}
+		if info, err := os.Stat(capture); err != nil || !info.IsDir() {
+			t.Fatalf("prune changed capture directory: %v, %v", info, err)
+		}
+	}
+}
+
+func TestOpenInitializedStoreWithContainedMarkerAlias(t *testing.T) {
+	s := newStore(t)
+	root := fixture(t, s, "source.example/retained", "retained")
+	marker := filepath.Join(s.Path(), "oci-layout")
+	target := filepath.Join(s.Path(), "layout-marker.json")
+	if err := os.Rename(marker, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(target), marker); err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			t.Skipf("creating symlinks is not permitted: %v", err)
+		}
+		t.Fatal(err)
+	}
+	reopened, err := Open(s.Path())
+	if err != nil {
+		t.Fatal("reopen initialized store with contained marker alias:", err)
+	}
+	if err := reopened.With(t.Context(), func(session *Session) error {
+		entries, err := session.List(t.Context())
+		if err != nil {
+			return err
+		}
+		if len(entries) != 1 || entries[0].Descriptor.Digest != root.Descriptor.Digest ||
+			len(entries[0].Names) != 1 || entries[0].Names[0] != "localhost/retained:latest" {
+			t.Fatalf("contained marker alias changed retained bundle: %+v", entries)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

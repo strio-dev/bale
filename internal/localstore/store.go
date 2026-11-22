@@ -25,7 +25,6 @@ import (
 
 const maxMetadataBytes = 64 << 20
 const maxCaptureMetadataBytes = 16 << 20
-const captureName = "bale-capture.json"
 const atomicWritePrefix = ".bale-write-"
 
 type Store struct {
@@ -139,7 +138,7 @@ func (s *Store) initialize(ctx context.Context) (retErr error) {
 		return fmt.Errorf("managed store index is missing from nonempty store %s", s.path)
 	}
 	if hasLayout {
-		raw, err := readFile(layoutPath)
+		raw, err := readFile(layoutPath, maxMetadataBytes)
 		if err != nil {
 			return err
 		}
@@ -181,12 +180,12 @@ func (s *Session) metadata(ctx context.Context, fn func(*index) error) (retErr e
 	return fn(current)
 }
 
-func readFile(path string) ([]byte, error) {
+func readFile(path string, limit int64) ([]byte, error) {
 	entry, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if !entry.Mode().IsRegular() || entry.Size() > maxMetadataBytes {
+	if !entry.Mode().IsRegular() || entry.Size() > limit {
 		return nil, fmt.Errorf("invalid store metadata file %s", path)
 	}
 	fp, err := os.Open(path)
@@ -198,14 +197,14 @@ func readFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > maxMetadataBytes {
+	if !info.Mode().IsRegular() || info.Size() > limit {
 		return nil, fmt.Errorf("invalid store metadata file %s", path)
 	}
-	raw, err := io.ReadAll(io.LimitReader(fp, maxMetadataBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(fp, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) > maxMetadataBytes {
+	if int64(len(raw)) > limit {
 		return nil, fmt.Errorf("store metadata exceeds limit")
 	}
 	return raw, nil
@@ -222,7 +221,7 @@ func (s *Session) readIndex() (*index, error) {
 		return nil, fmt.Errorf("invalid managed OCI layout")
 	}
 	result := &index{roots: map[digest.Digest]v1.Descriptor{}, names: map[string]digest.Digest{}}
-	raw, err = readFile(filepath.Join(root, "index.json"))
+	raw, err = readFile(filepath.Join(root, "index.json"), maxMetadataBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -338,15 +337,12 @@ func capturePath(root string, d digest.Digest) string {
 	return filepath.Join(root, "captures", d.Algorithm().String(), d.Encoded()+".json")
 }
 func (s *Session) state(d digest.Digest) (*transport.CaptureState, error) {
-	raw, err := readFile(capturePath(s.store.path, d))
+	raw, err := readFile(capturePath(s.store.path, d), maxCaptureMetadataBytes)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
-	}
-	if len(raw) > maxCaptureMetadataBytes {
-		return nil, fmt.Errorf("capture metadata exceeds limit")
 	}
 	if err = jsonutil.Validate(raw, true); err != nil {
 		return nil, err
@@ -446,6 +442,7 @@ func (s *Session) Resolve(ctx context.Context, value string) (result Record, ret
 	})
 	return
 }
+
 func (s *Session) List(ctx context.Context) (result []Entry, retErr error) {
 	result = []Entry{}
 	retErr = s.metadata(ctx, func(current *index) error {
@@ -585,43 +582,4 @@ func (s *Session) Remove(ctx context.Context, references []string) error {
 		}
 		return s.writeIndex(ctx, current)
 	})
-}
-
-// View exposes only disposable index/locator metadata, sharing the global CAS.
-func (s *Session) View(ctx context.Context, record Record, fn func(string) error) (retErr error) {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	parent := filepath.Join(s.store.path, "views")
-	if err := os.MkdirAll(parent, 0700); err != nil {
-		return err
-	}
-	path, err := os.MkdirTemp(parent, "read-")
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, os.RemoveAll(path)) }()
-	raw, err := json.Marshal(v1.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: v1.MediaTypeImageIndex, Manifests: []v1.Descriptor{record.Descriptor}})
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(path, "index.json"), raw, 0600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0600); err != nil {
-		return err
-	}
-	if err := os.Symlink(filepath.Join(s.store.path, "blobs"), filepath.Join(path, "blobs")); err != nil {
-		return err
-	}
-	if record.MetadataOnly {
-		raw, err := json.Marshal(record.Capture)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(path, captureName), raw, 0600); err != nil {
-			return err
-		}
-	}
-	return fn(path)
 }

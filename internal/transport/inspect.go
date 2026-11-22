@@ -69,7 +69,7 @@ func (s *Service) openInspectedLayout(ctx context.Context, path string, load fun
 	if strings.TrimSpace(path) == "" {
 		return fail(ErrInvalid, fmt.Errorf("layout path is required"))
 	}
-	layout, root, err := readLayoutRoot(ctx, path)
+	layout, root, err := readLayoutRoot(path)
 	if err != nil {
 		return fail(layoutReadKind(err), err)
 	}
@@ -117,6 +117,16 @@ func layoutReadKind(err error) error {
 // discover referrers, resolve source selectors, publish content, or close Store.
 func (s *Service) InspectRoot(ctx context.Context, root Root) (InspectResult, error) {
 	return s.inspectRoot(ctx, root, bundle.LoadSnapshotGraph)
+}
+
+// InspectMetadataRoot verifies a pinned bundle's envelopes and interpreted metadata
+// without reading opaque payloads or contacting capture sources. It borrows Root.Store.
+func (s *Service) InspectMetadataRoot(ctx context.Context, root Root) (InspectResult, error) {
+	result, err := s.inspectRoot(ctx, root, bundle.InspectSnapshotGraph)
+	if err == nil {
+		result.MetadataOnly = true
+	}
+	return result, err
 }
 
 func (s *Service) inspectRoot(ctx context.Context, root Root, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) (InspectResult, error) {

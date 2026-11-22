@@ -15,6 +15,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/strio-dev/bale/internal/bundle"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 )
 
@@ -27,7 +28,7 @@ type ArchiveResult struct {
 
 // Save writes the required bundle closure as a deterministic, uncompressed OCI
 // layout tar. Unrelated files in the input layout are never archived.
-func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (result ArchiveResult, retErr error) {
+func (s *Service) Save(ctx context.Context, layoutPath, archivePath string) (ArchiveResult, error) {
 	return s.saveArchive(ctx, layoutPath, archivePath, nil)
 }
 
@@ -40,15 +41,45 @@ func (s *Service) SaveTo(ctx context.Context, layoutPath string, out io.Writer) 
 	return s.saveArchive(ctx, layoutPath, "", out)
 }
 
-func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath string, out io.Writer) (result ArchiveResult, retErr error) {
-	defer func() { retErr = operationError("save", layoutPath, result.Descriptor, nil, retErr) }()
-	if err := ctx.Err(); err != nil {
+// SaveRoot writes a verified archive of a complete pinned bundle. It neither
+// hydrates capture payloads nor closes Root.Store.
+func (s *Service) SaveRoot(ctx context.Context, root Root, archivePath string) (ArchiveResult, error) {
+	return saveRootArchive(ctx, root, archivePath, nil)
+}
+
+// SaveRootTo streams the same archive as SaveRoot and leaves out open.
+func (s *Service) SaveRootTo(ctx context.Context, root Root, out io.Writer) (ArchiveResult, error) {
+	if out == nil {
+		return ArchiveResult{}, operationError("save", root.Repository, root.Descriptor, ErrInvalid, fmt.Errorf("archive writer is required"))
+	}
+	return saveRootArchive(ctx, root, "", out)
+}
+
+func saveRootArchive(ctx context.Context, root Root, archivePath string, out io.Writer) (result ArchiveResult, retErr error) {
+	defer func() { retErr = operationError("save", root.Repository, result.Descriptor, nil, retErr) }()
+	if err := checkSaveOutput(ctx, archivePath, out); err != nil {
 		return result, err
 	}
+	if root.Store == nil {
+		return result, fmt.Errorf("%w: archive needs a source store", ErrInvalid)
+	}
+	return writeArchive(ctx, root.Store, root.Descriptor, "", archivePath, out)
+}
+
+func checkSaveOutput(ctx context.Context, archivePath string, out io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if out == nil {
-		if err := checkArchiveDestination(archivePath); err != nil {
-			return result, err
-		}
+		return checkArchiveDestination(archivePath)
+	}
+	return nil
+}
+
+func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath string, out io.Writer) (result ArchiveResult, retErr error) {
+	defer func() { retErr = operationError("save", layoutPath, result.Descriptor, nil, retErr) }()
+	if err := checkSaveOutput(ctx, archivePath, out); err != nil {
+		return result, err
 	}
 	layout, snapshot, capture, _, err := s.openLocalBundle(ctx, layoutPath)
 	if err != nil {
@@ -59,7 +90,11 @@ func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath strin
 	if capture != nil {
 		store = captureSource{local: store, service: s, sources: capture.Sources}
 	}
-	result.Descriptor = snapshot.Descriptor
+	return writeArchive(ctx, store, snapshot.Descriptor, layoutPath, archivePath, out)
+}
+
+func writeArchive(ctx context.Context, store content.Fetcher, root v1.Descriptor, layoutPath, archivePath string, out io.Writer) (result ArchiveResult, retErr error) {
+	result.Descriptor = root
 	var parent string
 	if out == nil {
 		parent = filepath.Dir(filepath.Clean(archivePath))
@@ -73,7 +108,7 @@ func (s *Service) saveArchive(ctx context.Context, layoutPath, archivePath strin
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(stage)) }()
 	normalized := filepath.Join(stage, "layout")
-	if err := writeLayout(ctx, store, snapshot.Descriptor, normalized, &Stats{}); err != nil {
+	if err := writeLayout(ctx, store, root, normalized, &Stats{}); err != nil {
 		return result, err
 	}
 	if out != nil {

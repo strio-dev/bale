@@ -13,7 +13,6 @@ import (
 
 	"github.com/strio-dev/bale"
 	"github.com/strio-dev/bale/internal/localstore"
-	"github.com/strio-dev/bale/internal/transport"
 	"oras.land/oras-go/v2/content/oci"
 )
 
@@ -119,20 +118,24 @@ func withRecord[T any](ctx context.Context, s *Store, reference string, fn func(
 	})
 	return
 }
-func viewResult[T any](ctx context.Context, session *localstore.Session, record localstore.Record, fn func(context.Context, string) (T, error)) (result T, retErr error) {
-	retErr = session.View(ctx, record, func(path string) error {
-		var err error
-		result, err = fn(transport.WithManagedLayoutCAS(ctx, path, session.Storage()), path)
-		return err
-	})
-	return
+func recordRoot(session *localstore.Session, record localstore.Record) bale.Root {
+	return bale.Root{Descriptor: record.Descriptor, Store: session.Storage()}
+}
+
+// Complete records may retain useful source captures, but ordinary reads and
+// deliveries must not gain online fallback merely because that capture exists.
+func missingCapture(record localstore.Record) *bale.CaptureState {
+	if record.MetadataOnly {
+		return record.Capture
+	}
+	return nil
 }
 
 // Materialize fetches missing pinned bytes into the shared CAS. It preserves the
 // bundle digest, does not refresh selectors and never executes plugins.
 func (s *Store) Materialize(ctx context.Context, reference string) (bale.PullResult, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.PullResult, error) {
-		return s.client.MaterializeInto(ctx, bale.Root{Descriptor: record.Descriptor, Store: session.Storage()}, record.Capture, session.Storage())
+		return s.client.MaterializeInto(ctx, recordRoot(session, record), record.Capture, session.Storage())
 	})
 }
 
@@ -165,16 +168,16 @@ func (s *Store) save(ctx context.Context, reference, archivePath string, out io.
 				return bale.ArchiveResult{}, err
 			}
 		}
-		if _, err := s.client.MaterializeInto(ctx, bale.Root{Descriptor: record.Descriptor, Store: session.Storage()}, record.Capture, session.Storage()); err != nil {
+		if _, err := s.client.MaterializeInto(ctx, recordRoot(session, record), record.Capture, session.Storage()); err != nil {
 			return bale.ArchiveResult{}, err
 		}
-		record.MetadataOnly = false
-		result, err := viewResult(ctx, session, record, func(ctx context.Context, path string) (bale.ArchiveResult, error) {
-			if out != nil {
-				return s.client.SaveTo(ctx, path, out)
-			}
-			return s.client.Save(ctx, path, archivePath)
-		})
+		var result bale.ArchiveResult
+		var err error
+		if out != nil {
+			result, err = s.client.SaveRootTo(ctx, recordRoot(session, record), out)
+		} else {
+			result, err = s.client.SaveRoot(ctx, recordRoot(session, record), archivePath)
+		}
 		result.LayoutPath = ""
 		return result, err
 	})
@@ -230,9 +233,11 @@ func (s *Store) load(ctx context.Context, archivePath string, in io.Reader, tags
 
 func (s *Store) Inspect(ctx context.Context, reference string) (bale.InspectResult, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.InspectResult, error) {
-		return viewResult(ctx, session, record, func(ctx context.Context, path string) (bale.InspectResult, error) {
-			return s.client.InspectLayout(ctx, path)
-		})
+		root := recordRoot(session, record)
+		if record.MetadataOnly {
+			return s.client.InspectMetadataRoot(ctx, root)
+		}
+		return s.client.InspectRoot(ctx, root)
 	})
 }
 func (s *Store) List(ctx context.Context) (result []Entry, retErr error) {
@@ -250,13 +255,15 @@ func (s *Store) Prune(ctx context.Context, dryRun bool) (PruneResult, error) {
 }
 func (s *Store) ExportDelivery(ctx context.Context, reference string) (bale.DeliveryFile, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.DeliveryFile, error) {
-		return viewResult(ctx, session, record, func(ctx context.Context, path string) (bale.DeliveryFile, error) {
-			return s.client.ExportDeliveryLayout(ctx, path)
-		})
+		root := recordRoot(session, record)
+		if record.MetadataOnly {
+			return s.client.ExportDeliveryMetadataRoot(ctx, root)
+		}
+		return s.client.ExportDeliveryRoot(ctx, root)
 	})
 }
 
-func withPair[T any](ctx context.Context, s *Store, before, after string, fn func(context.Context, string, string) (T, error)) (result T, retErr error) {
+func withPair[T any](ctx context.Context, s *Store, before, after string, fn func(context.Context, bale.Root, bale.Root) (T, error)) (result T, retErr error) {
 	retErr = s.local.With(ctx, func(session *localstore.Session) error {
 		left, err := session.Resolve(ctx, before)
 		if err != nil {
@@ -266,24 +273,17 @@ func withPair[T any](ctx context.Context, s *Store, before, after string, fn fun
 		if err != nil {
 			return err
 		}
-		return session.View(ctx, left, func(a string) error {
-			ctx := transport.WithManagedLayoutCAS(ctx, a, session.Storage())
-			return session.View(ctx, right, func(b string) error {
-				result, err = fn(transport.WithManagedLayoutCAS(ctx, b, session.Storage()), a, b)
-				return err
-			})
-		})
+		result, err = fn(ctx, recordRoot(session, left), recordRoot(session, right))
+		return err
 	})
 	return
 }
 func (s *Store) Diff(ctx context.Context, before, after string) (bale.DiffResult, error) {
-	return withPair(ctx, s, before, after, func(ctx context.Context, a, b string) (bale.DiffResult, error) {
-		return s.client.DiffLayouts(ctx, a, b)
-	})
+	return withPair(ctx, s, before, after, s.client.DiffRoots)
 }
 func (s *Store) UpdateDelivery(ctx context.Context, before, after string, file bale.DeliveryFile) (bale.DeliveryUpdateResult, error) {
-	return withPair(ctx, s, before, after, func(ctx context.Context, a, b string) (bale.DeliveryUpdateResult, error) {
-		return s.client.UpdateDeliveryLayouts(ctx, a, b, file)
+	return withPair(ctx, s, before, after, func(ctx context.Context, a, b bale.Root) (bale.DeliveryUpdateResult, error) {
+		return s.client.UpdateDeliveryRoots(ctx, a, b, file)
 	})
 }
 
@@ -292,21 +292,18 @@ func (s *Store) UpdateDelivery(ctx context.Context, before, after string, file b
 // its sealed transport plan within the same activity lease.
 func (s *Store) PlanPush(ctx context.Context, reference, destination string, options bale.PushOptions) (bale.DeliveryPlan, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.DeliveryPlan, error) {
-		result, err := viewResult(ctx, session, record, func(ctx context.Context, path string) (bale.DeliveryPlan, error) {
-			return s.client.PlanPush(ctx, path, destination, options)
-		})
+		result, err := s.client.PlanPushRoot(ctx, recordRoot(session, record), missingCapture(record), reference, destination, options)
 		result.LayoutPath = reference
 		return result, err
 	})
 }
 func (s *Store) Push(ctx context.Context, reference, destination string, options bale.PushOptions) (bale.PushResult, error) {
 	return withRecord(ctx, s, reference, func(session *localstore.Session, record localstore.Record) (bale.PushResult, error) {
-		return viewResult(ctx, session, record, func(ctx context.Context, path string) (bale.PushResult, error) {
-			plan, err := s.client.PlanPush(ctx, path, destination, options)
-			if err != nil {
-				return bale.PushResult{}, err
-			}
-			return s.client.Push(ctx, plan)
-		})
+		root, capture := recordRoot(session, record), missingCapture(record)
+		plan, err := s.client.PlanPushRoot(ctx, root, capture, reference, destination, options)
+		if err != nil {
+			return bale.PushResult{}, err
+		}
+		return s.client.PushRoot(ctx, root, capture, plan)
 	})
 }

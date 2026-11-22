@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -18,7 +19,77 @@ import (
 	"oras.land/oras-go/v2/registry"
 )
 
-func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, opts PushOptions) (result DeliveryPlan, retErr error) {
+// deliveryInput borrows a caller's pinned store or owns one separately opened
+// external layout. A plan never keeps an input or any open handles.
+type deliveryInput struct {
+	root          Root
+	capture       *CaptureState
+	captureDigest digest.Digest
+	layout        *openedLayout
+}
+
+func (in deliveryInput) close() {
+	if in.layout != nil {
+		in.layout.Close()
+	}
+}
+
+func (s *Service) openDeliveryLayout(ctx context.Context, path string) (deliveryInput, error) {
+	layout, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, path)
+	if err != nil {
+		return deliveryInput{}, err
+	}
+	return deliveryInput{
+		root:    Root{Descriptor: snapshot.Descriptor, Store: layout.store},
+		capture: capture, captureDigest: captureDigest, layout: layout,
+	}, nil
+}
+
+func openDeliveryRoot(ctx context.Context, root Root, capture *CaptureState) (deliveryInput, error) {
+	if root.Store == nil {
+		return deliveryInput{}, fmt.Errorf("%w: delivery needs a source store", ErrInvalid)
+	}
+	in := deliveryInput{root: Root{Descriptor: cloneDescriptor(root.Descriptor), Store: root.Store}}
+	if capture == nil {
+		if _, err := bundle.LoadSnapshotGraph(ctx, in.root.Store, in.root.Descriptor); err != nil {
+			return deliveryInput{}, err
+		}
+		return in, nil
+	}
+
+	state := *capture
+	state.Sources = maps.Clone(capture.Sources)
+	snapshot, err := bundle.InspectSnapshotGraph(ctx, in.root.Store, in.root.Descriptor)
+	if err != nil {
+		return deliveryInput{}, err
+	}
+	if err := ValidateCaptureState(ctx, in.root.Store, snapshot, state); err != nil {
+		return deliveryInput{}, operationError("capture", root.Repository, in.root.Descriptor, ErrIntegrity, err)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return deliveryInput{}, err
+	}
+	in.capture, in.captureDigest = &state, digest.FromBytes(raw)
+	return in, nil
+}
+
+func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, opts PushOptions) (DeliveryPlan, error) {
+	return s.planPush(ctx, layoutPath, destination, opts, false, func() (deliveryInput, error) {
+		return s.openDeliveryLayout(ctx, layoutPath)
+	})
+}
+
+// PlanPushRoot plans delivery offline from a pinned, caller-owned source. An
+// optional capture allows missing opaque payloads; planning never hydrates them.
+// Reference labels the plan and is never treated as a filesystem path.
+func (s *Service) PlanPushRoot(ctx context.Context, root Root, capture *CaptureState, reference, destination string, opts PushOptions) (DeliveryPlan, error) {
+	return s.planPush(ctx, reference, destination, opts, true, func() (deliveryInput, error) {
+		return openDeliveryRoot(ctx, root, capture)
+	})
+}
+
+func (s *Service) planPush(ctx context.Context, reference, destination string, opts PushOptions, pinnedRoot bool, open func() (deliveryInput, error)) (result DeliveryPlan, retErr error) {
 	defer func() {
 		if retErr != nil {
 			retErr = operationError("plan push", destination, result.Descriptor, nil, retErr)
@@ -29,19 +100,17 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 	if err != nil {
 		return DeliveryPlan{}, operationError("destination", destination, v1.Descriptor{}, ErrInvalid, err)
 	}
-	layout, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, layoutPath)
+	input, err := open()
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
-	defer layout.Close()
-	store := layout.store
-	plan := DeliveryPlan{MetadataOnly: capture != nil, captureDigest: captureDigest, LayoutPath: layoutPath, Destination: destination, Descriptor: snapshot.Descriptor, Repositories: []DeliveryRepository{}, Tags: []Tag{}}
-	if capture == nil {
-		if _, err := bundle.LoadSnapshotGraph(ctx, store, snapshot.Descriptor); err != nil {
-			return DeliveryPlan{}, err
-		}
+	defer input.close()
+	store, root := input.root.Store, input.root.Descriptor
+	plan := DeliveryPlan{
+		MetadataOnly: input.capture != nil, captureDigest: input.captureDigest, pinnedRoot: pinnedRoot,
+		LayoutPath: reference, Destination: destination, Descriptor: root, Repositories: []DeliveryRepository{}, Tags: []Tag{},
 	}
-	snapshots, err := collectBundleSnapshots(ctx, store, snapshot.Descriptor, bundle.InspectSnapshot)
+	snapshots, err := collectBundleSnapshots(ctx, store, root, bundle.InspectSnapshot)
 	metadata := make([]bundle.Metadata, len(snapshots))
 	for i, snap := range snapshots {
 		metadata[i] = snap.Metadata
@@ -63,7 +132,7 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 		if err != nil {
 			return DeliveryPlan{}, fmt.Errorf("%w: delivery file: %v", ErrInvalid, err)
 		}
-		if file.Bundle != snapshot.Descriptor.Digest {
+		if file.Bundle != root.Digest {
 			return DeliveryPlan{}, fmt.Errorf("%w: delivery file bundle does not match layout root", ErrInvalid)
 		}
 		for _, artifact := range file.Artifacts {
@@ -327,7 +396,12 @@ func (s *Service) PlanPush(ctx context.Context, layoutPath, destination string, 
 }
 func planSeal(p DeliveryPlan) string {
 	raw, _ := json.Marshal(p)
-	return digest.FromBytes(append(raw, []byte(p.captureDigest)...)).String()
+	if p.pinnedRoot {
+		raw = append(raw, 1)
+	} else {
+		raw = append(raw, 0)
+	}
+	return digest.FromBytes(append(raw, p.captureDigest...)).String()
 }
 
 func collectBundleMetadata(ctx context.Context, store content.ReadOnlyStorage, root v1.Descriptor, load func(context.Context, content.ReadOnlyStorage, v1.Descriptor) (bundle.Snapshot, error)) ([]bundle.Metadata, error) {
@@ -386,7 +460,22 @@ func collectBundleSnapshots(ctx context.Context, store content.ReadOnlyStorage, 
 	return result, nil
 }
 
-func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResult, retErr error) {
+func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (PushResult, error) {
+	return s.push(ctx, plan, false, func() (deliveryInput, error) {
+		return s.openDeliveryLayout(ctx, plan.LayoutPath)
+	})
+}
+
+// PushRoot executes a sealed root plan using a caller-owned store and the same
+// pinned descriptor and capture state as planning. It never opens a layout or
+// closes Root.Store; the caller keeps the source readable through publication.
+func (s *Service) PushRoot(ctx context.Context, root Root, capture *CaptureState, plan DeliveryPlan) (PushResult, error) {
+	return s.push(ctx, plan, true, func() (deliveryInput, error) {
+		return openDeliveryRoot(ctx, root, capture)
+	})
+}
+
+func (s *Service) push(ctx context.Context, plan DeliveryPlan, pinnedRoot bool, open func() (deliveryInput, error)) (result PushResult, retErr error) {
 	result = PushResult{Descriptor: cloneDescriptor(plan.Descriptor), Destination: plan.Destination, Repositories: cloneJSON(plan.Repositories), RepositoryMap: cloneJSON(plan.RepositoryMap), Tags: []Tag{}, Referrers: cloneJSON(plan.Referrers), Relocations: Relocations{}, Destinations: []AttachResult{}, Warnings: []string{"Tag publication is not atomic; concurrent writers can race between validation and publication."}, Stats: Stats{Accounting: statsAccounting}}
 	defer func() {
 		if retErr != nil {
@@ -397,22 +486,25 @@ func (s *Service) Push(ctx context.Context, plan DeliveryPlan) (result PushResul
 	if plan.seal == "" || plan.seal != planSeal(plan) {
 		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrInvalid, fmt.Errorf("delivery plan changed; generate a new plan"))
 	}
-	layout, snapshot, capture, captureDigest, err := s.openLocalBundle(ctx, plan.LayoutPath)
+	if plan.pinnedRoot != pinnedRoot {
+		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrInvalid, fmt.Errorf("delivery plan requires its original source type"))
+	}
+	input, err := open()
 	if err != nil {
 		return result, err
 	}
-	defer layout.Close()
-	store := layout.store
-	if captureDigest != plan.captureDigest || (capture != nil) != plan.MetadataOnly {
+	defer input.close()
+	store := input.root.Store
+	if input.captureDigest != plan.captureDigest || (input.capture != nil) != plan.MetadataOnly {
 		return result, operationError("plan", plan.LayoutPath, plan.Descriptor, ErrIntegrity, fmt.Errorf("local capture sources changed since planning"))
 	}
-	var mountSource map[digest.Digest]string
-	if capture != nil {
-		mountSource = capture.Sources
-		store = captureSource{local: store, service: s, sources: capture.Sources, stats: &result.Stats}
+	if input.root.Descriptor.Digest != plan.Descriptor.Digest {
+		return result, operationError("plan", plan.LayoutPath, plan.Descriptor, ErrIntegrity, fmt.Errorf("source root changed since planning"))
 	}
-	if snapshot.Descriptor.Digest != plan.Descriptor.Digest {
-		return result, operationError("plan", plan.Destination, plan.Descriptor, ErrIntegrity, fmt.Errorf("layout root changed since planning"))
+	var mountSource map[digest.Digest]string
+	if input.capture != nil {
+		mountSource = input.capture.Sources
+		store = captureSource{local: store, service: s, sources: mountSource, stats: &result.Stats}
 	}
 	dest, err := completionRef(plan.Destination)
 	if err != nil {

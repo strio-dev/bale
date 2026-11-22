@@ -18,9 +18,35 @@ func openLayoutDirectory(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), path), nil
 }
 
+// openLayoutMemberRoot resolves relative OCI header and blob links below the
+// same directory used for strict capture marker reads. The literal "/."
+// requires a directory without cleaning the selected path or changing aliases.
+func openLayoutMemberRoot(path string, dir *os.File) (_ *layoutMemberRoot, retErr error) {
+	root, err := os.OpenRoot(path + "/.")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			_ = root.Close()
+		}
+	}()
+	directory, err := dir.Stat()
+	if err != nil {
+		return nil, err
+	}
+	anchored, err := root.Stat(".")
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(directory, anchored) {
+		return nil, fmt.Errorf("%w: layout directory changed while opening", ErrIntegrity)
+	}
+	return &layoutMemberRoot{root: root, flags: unix.O_RDONLY | unix.O_NONBLOCK}, nil
+}
+
 func openLayoutMemberAt(parent *os.File, name string, directory bool) (*os.File, error) {
-	// Pass a single component to the kernel. O_NOFOLLOW here rejects links
-	// rather than requesting os.Root's in-root symlink resolution.
+	// Pass a single component to the kernel. O_NOFOLLOW keeps capture metadata strict.
 	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if directory {
 		flags |= unix.O_DIRECTORY

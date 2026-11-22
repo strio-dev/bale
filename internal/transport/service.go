@@ -123,6 +123,7 @@ type DestinationAttachment struct {
 type DeliveryPlan struct {
 	MetadataOnly  bool `json:"metadataOnly,omitempty"`
 	captureDigest digest.Digest
+	pinnedRoot    bool
 	Destinations  []DestinationAttachment `json:"destinations"`
 	// Relocations lists planned canonical placements; Push confirms them after verification.
 	Relocations   Relocations          `json:"relocations"`

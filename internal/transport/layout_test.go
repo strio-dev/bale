@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/strio-dev/bale/internal/deliveryfile"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/memory"
-	"oras.land/oras-go/v2/content/oci"
 )
 
 func TestStandaloneLayoutHeaders(t *testing.T) {
@@ -103,8 +103,17 @@ func TestStandaloneLayoutHeaderFileLimits(t *testing.T) {
 					symlinkLayoutFixture(t, filepath.Base(target), filename)
 				}
 
-				_, saveErr := svc.SaveTo(t.Context(), layout, io.Discard)
-				_, inspectErr := svc.InspectLayout(t.Context(), layout)
+				saved, saveErr := svc.SaveTo(t.Context(), layout, io.Discard)
+				inspected, inspectErr := svc.InspectLayout(t.Context(), layout)
+				if kind == "symlink" && runtime.GOOS != "windows" {
+					if saveErr != nil || !content.Equal(saved.Descriptor, root) {
+						t.Fatalf("save via contained header link: descriptor=%+v error=%v", saved.Descriptor, saveErr)
+					}
+					if inspectErr != nil || !content.Equal(inspected.Descriptor, root) {
+						t.Fatalf("inspect via contained header link: descriptor=%+v error=%v", inspected.Descriptor, inspectErr)
+					}
+					return
+				}
 				checkStandaloneHeaderError(t, header, saveErr, inspectErr)
 			})
 		}
@@ -133,7 +142,7 @@ func checkStandaloneHeaderError(t *testing.T, member string, saveErr, inspectErr
 
 func openLayoutTestRoot(t *testing.T, path string) (content.ReadOnlyStorage, v1.Descriptor, error) {
 	t.Helper()
-	layout, root, err := readLayoutRoot(t.Context(), path)
+	layout, root, err := readLayoutRoot(path)
 	if err != nil {
 		return nil, v1.Descriptor{}, err
 	}
@@ -157,7 +166,7 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 
 	t.Run("regular files and ownership", func(t *testing.T) {
 		path := layoutFor(t, src, root)
-		layout, got, err := readLayoutRoot(t.Context(), path)
+		layout, got, err := readLayoutRoot(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,6 +199,16 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 		}
 	})
 
+	t.Run("explicit root alias", func(t *testing.T) {
+		path := layoutFor(t, src, root)
+		alias := filepath.Join(t.TempDir(), "alias")
+		symlinkLayoutFixture(t, path, alias)
+		result, err := (&Service{}).InspectLayout(t.Context(), alias)
+		if err != nil || !content.Equal(result.Descriptor, root) {
+			t.Fatalf("inspect explicit layout root alias: %+v %v", result, err)
+		}
+	})
+
 	for _, kind := range []string{"directory leaf", "symlink leaf", "symlink directory"} {
 		t.Run(kind, func(t *testing.T) {
 			path := layoutFor(t, src, root)
@@ -213,48 +232,23 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 				}
 				symlinkLayoutFixture(t, filepath.Base(target), filename)
 			}
-			store, _, err := openLayoutTestRoot(t, path)
+			layout, _, err := readLayoutRoot(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := content.FetchAll(t.Context(), store, root); !errors.Is(err, ErrIntegrity) {
-				t.Errorf("Fetch: want integrity error, got %v", err)
+			defer layout.Close()
+			_, fetchErr := content.FetchAll(t.Context(), layout.store, root)
+			exists, existsErr := layout.store.Exists(t.Context(), root)
+			if kind != "directory leaf" && runtime.GOOS != "windows" {
+				if fetchErr != nil || !exists || existsErr != nil {
+					t.Fatalf("contained blob link: fetch=%v exists=%v %v", fetchErr, exists, existsErr)
+				}
+				return
 			}
-			if exists, err := store.Exists(t.Context(), root); exists || !errors.Is(err, ErrIntegrity) {
-				t.Errorf("Exists: want integrity error, got exists=%v err=%v", exists, err)
+			if !errors.Is(fetchErr, ErrIntegrity) || exists || !errors.Is(existsErr, ErrIntegrity) {
+				t.Errorf("want integrity errors: fetch=%v exists=%v %v", fetchErr, exists, existsErr)
 			}
 		})
-	}
-}
-
-func TestManagedLayoutCASIsBoundToItsView(t *testing.T) {
-	src := memory.New()
-	root := snapshotFor(t, src, []string{"example.test/bundle"}, []v1.Descriptor{object(t, src, "payload")}).Descriptor
-	view, other := layoutFor(t, src, root), layoutFor(t, src, root)
-	cas, err := oci.NewStorage(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := WithManagedLayoutCAS(t.Context(), view, cas)
-	for _, tc := range []struct {
-		ctx     context.Context
-		path    string
-		managed bool
-	}{
-		{ctx, view, true},
-		{ctx, other, false},
-		{t.Context(), view, false},
-		{context.WithValue(t.Context(), managedLayoutCASKey(view), cas), view, false},
-	} {
-		layout, _, err := readLayoutRoot(tc.ctx, tc.path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		layout.Close()
-		if (layout.store == cas) != tc.managed {
-			t.Errorf("CAS reuse for %s: want managed=%v", tc.path, tc.managed)
-		}
 	}
 }
 

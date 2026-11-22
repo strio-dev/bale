@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -105,7 +104,7 @@ func TestStandaloneLayoutHeaderFileLimits(t *testing.T) {
 
 				saved, saveErr := svc.SaveTo(t.Context(), layout, io.Discard)
 				inspected, inspectErr := svc.InspectLayout(t.Context(), layout)
-				if kind == "symlink" && runtime.GOOS != "windows" {
+				if kind == "symlink" {
 					if saveErr != nil || !content.Equal(saved.Descriptor, root) {
 						t.Fatalf("save via contained header link: descriptor=%+v error=%v", saved.Descriptor, saveErr)
 					}
@@ -199,6 +198,16 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 		}
 	})
 
+	t.Run("empty root path", func(t *testing.T) {
+		layout, _, err := readLayoutRoot("")
+		if layout != nil {
+			layout.Close()
+		}
+		if layout != nil || !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("want empty layout root rejected, got %v", err)
+		}
+	})
+
 	t.Run("explicit root alias", func(t *testing.T) {
 		path := layoutFor(t, src, root)
 		alias := filepath.Join(t.TempDir(), "alias")
@@ -239,7 +248,7 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 			defer layout.Close()
 			_, fetchErr := content.FetchAll(t.Context(), layout.store, root)
 			exists, existsErr := layout.store.Exists(t.Context(), root)
-			if kind != "directory leaf" && runtime.GOOS != "windows" {
+			if kind != "directory leaf" {
 				if fetchErr != nil || !exists || existsErr != nil {
 					t.Fatalf("contained blob link: fetch=%v exists=%v %v", fetchErr, exists, existsErr)
 				}
@@ -247,6 +256,58 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 			}
 			if !errors.Is(fetchErr, ErrIntegrity) || exists || !errors.Is(existsErr, ErrIntegrity) {
 				t.Errorf("want integrity errors: fetch=%v exists=%v %v", fetchErr, exists, existsErr)
+			}
+		})
+	}
+}
+
+func TestExternalLayoutCaptureMarkerPresence(t *testing.T) {
+	src := memory.New()
+	root := snapshotFor(t, src, []string{"example.test/bundle"}, []v1.Descriptor{object(t, src, "payload")}).Descriptor
+	markerBytes := `{"schemaVersion":1,"bundle":"` + root.Digest.String() + `","sources":{}}`
+	for _, kind := range []string{"absent", "regular", "contained link", "dangling link"} {
+		t.Run(kind, func(t *testing.T) {
+			path := layoutFor(t, src, root)
+			marker := filepath.Join(path, captureFile)
+			switch kind {
+			case "regular":
+				if err := os.WriteFile(marker, []byte(markerBytes), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "contained link", "dangling link":
+				target := captureFile + ".target"
+				if kind == "contained link" {
+					if err := os.WriteFile(filepath.Join(path, target), []byte(markerBytes), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				symlinkLayoutFixture(t, target, marker)
+			}
+
+			layout, _, err := readLayoutRoot(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer layout.Close()
+			raw, present, err := layout.captureMetadata()
+			switch kind {
+			case "absent":
+				if raw != nil || present || err != nil {
+					t.Fatalf("want absent marker: raw=%q present=%t err=%v", raw, present, err)
+				}
+			case "regular", "contained link":
+				if string(raw) != markerBytes || !present || err != nil {
+					t.Fatalf("want marker bytes: raw=%q present=%t err=%v", raw, present, err)
+				}
+			default:
+				if raw != nil || present || !errors.Is(err, ErrIntegrity) || errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("want invalid, not absent marker: raw=%q present=%t err=%v", raw, present, err)
+				}
+				return
+			}
+			result, err := (&Service{}).InspectLayout(t.Context(), path)
+			if err != nil || !content.Equal(result.Descriptor, root) || result.MetadataOnly != present {
+				t.Fatalf("inspect marker %q: descriptor=%v metadataOnly=%t err=%v", kind, result.Descriptor, result.MetadataOnly, err)
 			}
 		})
 	}

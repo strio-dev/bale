@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -143,6 +144,47 @@ func TestPublicInspectCapturedBundleWithoutSources(t *testing.T) {
 	if _, err := offline.InspectLayout(ctx, layout); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("invalid capture marker", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating symlinks on Windows can require extra privileges")
+		}
+		const marker = "bale-capture.json"
+		// The marker loops within the fixture; no path outside it is needed.
+		if err := os.Symlink(marker, filepath.Join(layout, marker)); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				t.Skipf("creating symlinks is not permitted: %v", err)
+			}
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(filepath.Join(layout, marker)) })
+		_, err := offline.InspectLayout(ctx, layout)
+		if !errors.Is(err, bale.ErrIntegrity) || errors.Is(err, bale.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("invalid capture marker: %v", err)
+		}
+		var cause *os.PathError
+		if !errors.As(err, &cause) || cause.Path != marker {
+			t.Fatalf("want original marker open error, got %v", err)
+		}
+	})
+	t.Run("unreadable capture marker target", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			t.Skip("fixture requires unprivileged POSIX file permissions")
+		}
+		target := filepath.Join(layout, "marker-target.json")
+		if err := os.WriteFile(target, []byte("{}"), 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Base(target), filepath.Join(layout, "bale-capture.json")); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				t.Skipf("creating symlinks is not permitted: %v", err)
+			}
+			t.Fatal(err)
+		}
+		_, err := offline.InspectLayout(ctx, layout)
+		if !errors.Is(err, os.ErrPermission) || errors.Is(err, bale.ErrIntegrity) {
+			t.Fatalf("expected ordinary permission denial, got %v", err)
+		}
+	})
 }
 
 func inspectLayoutFiles(t *testing.T, path string) map[string]string {

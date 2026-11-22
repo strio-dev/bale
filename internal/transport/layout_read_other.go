@@ -7,12 +7,10 @@ import (
 	"os"
 )
 
-func openLayoutDirectory(string) (*os.File, error) {
-	return nil, fmt.Errorf("%w: descriptor-relative OCI layout reads are unsupported on this platform", ErrUnsupported)
+func openLayoutFiles(string) (layoutFiles, error) {
+	return layoutFiles{}, fmt.Errorf("%w: descriptor-relative OCI layout reads are unsupported on this platform", ErrUnsupported)
 }
 
-func openLayoutMemberRoot(string, *os.File) (*layoutMemberRoot, error) { return nil, nil }
-
-func openLayoutMemberAt(*os.File, string, bool) (*os.File, error) {
+func (layoutFiles) openLayoutFile(string) (*os.File, error) {
 	return nil, ErrUnsupported
 }

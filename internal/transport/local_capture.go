@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -234,14 +236,34 @@ func copyCaptureObject(ctx context.Context, src content.Fetcher, dst content.Sto
 	return errors.Join(verified.Verify(), ctx.Err())
 }
 
-// captureMetadata reads the optional capture marker exactly once. A missing
-// file denotes a complete layout; invalid entries must not trigger that mode.
-func (l *openedLayout) captureMetadata() (raw []byte, present bool, err error) {
-	raw, err = l.readBoundedRegularFile(captureFile, maxCaptureBytes)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
+// captureMetadata reads the optional capture marker. Only an absent entry
+// denotes a complete layout; an invalid entry must not trigger that mode.
+func (l *openedLayout) captureMetadata() ([]byte, bool, error) {
+	file, err := l.files.open(captureFile)
+	if err == nil {
+		raw, err := readBoundedLayoutFile(captureFile, file, maxCaptureBytes)
+		return raw, err == nil, err
 	}
-	return raw, err == nil, err
+
+	if errors.Is(err, fs.ErrNotExist) {
+		// Inspect the leaf only after a not-found result to distinguish
+		// absence from a dangling entry. Never reopen using this result.
+		_, statErr := l.files.root.Lstat(captureFile)
+		switch {
+		case errors.Is(statErr, fs.ErrNotExist):
+			return nil, false, nil
+		case statErr != nil:
+			return nil, false, statErr
+		default:
+			// The entry exists: keep ENOENT diagnostic-only rather than
+			// exposing it to callers as an absence signal.
+			return nil, false, fmt.Errorf("%w: capture marker exists but could not be opened: %v", ErrIntegrity, err)
+		}
+	}
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, false, fmt.Errorf("%w: %w", ErrIntegrity, err)
+	}
+	return nil, false, err
 }
 
 func decodeLocalCapture(ctx context.Context, raw []byte, store content.ReadOnlyStorage, snapshot bundle.Snapshot) (*CaptureState, digest.Digest, error) {

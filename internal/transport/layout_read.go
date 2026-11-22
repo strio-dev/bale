@@ -22,91 +22,70 @@ type openedLayout struct {
 }
 
 func (l *openedLayout) Close() {
-	if l.files.memberRoot != nil {
-		_ = l.files.memberRoot.Close()
-	}
-	_ = l.files.directory.Close()
+	_ = l.files.root.Close()
 }
 
 // layoutFiles implements only Open so ORAS Fetch and fs.Stat (used by
 // Exists) both go through the same descriptor-validated regular-file policy.
 type layoutFiles struct {
-	directory  *os.File
-	memberRoot *layoutMemberRoot
+	root *os.Root
 }
-
-type layoutMemberRoot struct {
-	root  *os.Root
-	flags int
-}
-
-func (r *layoutMemberRoot) Close() error { return r.root.Close() }
 
 func (f layoutFiles) Open(name string) (fs.File, error) {
-	file, _, err := f.openRegular(name)
+	file, err := f.open(name)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := statRegularLayoutFile(name, file); err != nil {
+		_ = file.Close()
 		return nil, err
 	}
 	return file, nil
 }
 
-func (f layoutFiles) openRegular(name string) (*os.File, fs.FileInfo, error) {
+func (f layoutFiles) open(name string) (*os.File, error) {
 	pathErr := func(err error) error { return &fs.PathError{Op: "open", Path: name, Err: err} }
 	if name == "." || !fs.ValidPath(name) || strings.ContainsAny(name, "\\:\x00") {
-		return nil, nil, pathErr(fs.ErrInvalid)
+		return nil, pathErr(fs.ErrInvalid)
 	}
-	var file *os.File
-	var err error
-	// Only the OCI headers and blobs may use rooted relative links. The
-	// optional capture marker uses no-follow so an invalid link is not missing.
-	if f.memberRoot != nil && (name == "oci-layout" || name == "index.json" || strings.HasPrefix(name, "blobs/")) {
-		file, err = f.memberRoot.root.OpenFile(name, f.memberRoot.flags, 0)
-	} else {
-		file, err = f.openNoFollow(name)
-	}
+	file, err := f.openLayoutFile(name)
 	if err != nil {
-		return nil, nil, pathErr(err)
+		return nil, pathErr(err)
 	}
+	return file, nil
+}
+
+func statRegularLayoutFile(name string, file *os.File) (fs.FileInfo, error) {
 	info, err := file.Stat()
 	if err == nil && !info.Mode().IsRegular() {
 		err = fmt.Errorf("%w: not a regular file", ErrIntegrity)
 	}
 	if err != nil {
-		_ = file.Close()
-		return nil, nil, pathErr(err)
+		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	return file, info, nil
+	return info, nil
 }
 
-// openNoFollow performs strict single-component lookup for capture metadata
-// and for platforms without rooted link handling.
-func (f layoutFiles) openNoFollow(name string) (*os.File, error) {
-	parent, remaining := f.directory, name
-	for {
-		part, rest, more := strings.Cut(remaining, "/")
-		file, err := openLayoutMemberAt(parent, part, more)
-		if parent != f.directory {
-			_ = parent.Close()
-		}
-		if err != nil || !more {
-			return file, err
-		}
-		parent, remaining = file, rest
-	}
-}
-
-// readBoundedRegularFile also limits actual bytes read in case a regular file
-// grows after the size check.
 func (l *openedLayout) readBoundedRegularFile(name string, maxBytes int64) ([]byte, error) {
-	fp, info, err := l.files.openRegular(name)
+	file, err := l.files.open(name)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = fp.Close() }()
+	return readBoundedLayoutFile(name, file, maxBytes)
+}
+
+// readBoundedLayoutFile takes ownership of file and limits actual bytes read
+// in case a regular file grows after the size check.
+func readBoundedLayoutFile(name string, file *os.File, maxBytes int64) ([]byte, error) {
+	defer func() { _ = file.Close() }()
+	info, err := statRegularLayoutFile(name, file)
+	if err != nil {
+		return nil, err
+	}
 	if info.Size() > maxBytes {
 		return nil, fmt.Errorf("%s exceeds %d bytes", name, maxBytes)
 	}
-	raw, err := io.ReadAll(io.LimitReader(fp, maxBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -133,16 +112,11 @@ func (l *openedLayout) descriptor() (v1.Descriptor, error) {
 
 // A successful caller owns the returned layout. On failure no handle escapes.
 func readLayoutRoot(path string) (*openedLayout, v1.Descriptor, error) {
-	dir, err := openLayoutDirectory(path)
+	files, err := openLayoutFiles(path)
 	if err != nil {
 		return nil, v1.Descriptor{}, err
 	}
-	layout := &openedLayout{files: layoutFiles{directory: dir}}
-	layout.files.memberRoot, err = openLayoutMemberRoot(path, dir)
-	if err != nil {
-		layout.Close()
-		return nil, v1.Descriptor{}, err
-	}
+	layout := &openedLayout{files: files}
 	root, err := layout.descriptor()
 	if err != nil {
 		layout.Close()

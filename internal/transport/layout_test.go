@@ -100,9 +100,7 @@ func TestStandaloneLayoutHeaderFileLimits(t *testing.T) {
 					if err := os.Rename(filename, target); err != nil {
 						t.Fatal(err)
 					}
-					if err := os.Symlink(filepath.Base(target), filename); err != nil {
-						t.Fatal(err)
-					}
+					symlinkLayoutFixture(t, filepath.Base(target), filename)
 				}
 
 				_, saveErr := svc.SaveTo(t.Context(), layout, io.Discard)
@@ -110,6 +108,16 @@ func TestStandaloneLayoutHeaderFileLimits(t *testing.T) {
 				checkStandaloneHeaderError(t, header, saveErr, inspectErr)
 			})
 		}
+	}
+}
+
+func symlinkLayoutFixture(t *testing.T, target, name string) {
+	t.Helper()
+	if err := os.Symlink(target, name); err != nil {
+		if errors.Is(err, fs.ErrPermission) || symlinkPrivilegeNotHeld(err) {
+			t.Skipf("creating symlinks is not permitted: %v", err)
+		}
+		t.Fatal(err)
 	}
 }
 
@@ -203,12 +211,7 @@ func TestExternalLayoutFilePolicy(t *testing.T) {
 				if err := os.Rename(filename, target); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(filepath.Base(target), filename); err != nil {
-					if errors.Is(err, fs.ErrPermission) {
-						t.Skipf("creating symlinks is not permitted: %v", err)
-					}
-					t.Fatal(err)
-				}
+				symlinkLayoutFixture(t, filepath.Base(target), filename)
 			}
 			store, _, err := openLayoutTestRoot(t, path)
 			if err != nil {

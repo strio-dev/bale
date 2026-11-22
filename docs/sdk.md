@@ -17,12 +17,9 @@ The examples below are function-body excerpts using this client and an existing 
 | --- | --- |
 | `Credentials` | Caller-supplied ORAS credential callback. The default is anonymous; the SDK does not read Docker credential files. |
 | `HTTPClient` | Caller-owned TLS and transport policy. |
-| `AuthenticatedClient` | Caller-owned request client implementing `Do(*http.Request) (*http.Response, error)`. Mutually exclusive with `HTTPClient` and `Credentials`. Bale still discovers and validates registry metadata. |
 | `PlainHTTPRegistries` | Exact registry hosts allowed to use HTTP. |
 | `OnProgress` | Synchronous, serialized progress callbacks. Return promptly. |
 | `PluginRunner` | Explicit support for running configured discovery plugins. |
-
-For Bale-managed repositories, `AuthenticatedClient` owns transport and credential policy. One instance may receive requests for multiple origins; choose credentials per origin and do not forward them to unrelated origins.
 
 Capture progress reports resolution, plugin fetch/run and capture phases; `captured` precedes publication. Recipe events identify the zero-based `Input`, `Reference` and `Plugin`, with a pinned `Descriptor` when available. Capture notifications are advisory and can be skipped while another callback is active. Determine completion from results, not event counts.
 
@@ -112,7 +109,7 @@ Direct `Plan`/`Execute` follows the immutable OCI graph and selected referrers, 
 
 ### Caller-owned registry access
 
-Set `ClientOptions.RepositoryFactory` to retain an existing registry backend's authentication, certificate handling and network policy. Bale calls the factory with a context and canonical `registry/repository` name for resolution, capture and publication. Factory errors propagate; the client does not silently switch transports. The caller owns backend lifetimes. Factory backends use their own transport and authentication, so Bale does not call `AuthenticatedClient` for those requests.
+Set `ClientOptions.RepositoryFactory` to retain an existing registry backend's authentication, certificate handling and network policy. Bale calls the factory with a context and canonical `registry/repository` name for resolution, capture and publication. Factory errors propagate; the client does not silently switch transports. The caller owns backend lifetimes.
 
 Return a `bale.RegistryRepository`: an `oras.Target`, a separate `Blobs()` store, and `ReferrerPages`. Blob operations remain separate even when a layer contains OCI manifest bytes. Blob `Resolve` must report the actual digest and size. Implement ORAS's `registry.TagLister` as well when all-tags selection is needed.
 
